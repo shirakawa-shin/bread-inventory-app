@@ -2,7 +2,7 @@
   "name": "パン在庫管理アプリ",
   "short_name": "パン在庫",
   "description": "コーヒーショップ用パン在庫管理アプリ",
-  "start_url": "/",
+  "start_url": "/bread-inventory-app/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#3B82F6",
