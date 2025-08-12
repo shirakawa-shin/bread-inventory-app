@@ -1,0 +1,227 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Camera, Clock, Trash2, Plus, Minus, AlertCircle } from 'lucide-react';
+
+const BreadInventoryApp = () => {
+  const [breads, setBreads] = useState([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const fileInputRef = useRef(null);
+
+  // 現在時刻を1分ごとに更新
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handlePhotoCapture = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const newBread = {
+          id: Date.now(),
+          name: '',
+          photo: e.target.result,
+          deliveryTime: new Date(),
+          stock: 1,
+          expired: false
+        };
+        setBreads(prev => [...prev, newBread]);
+        setShowAddForm(true);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const updateBreadName = (id, name) => {
+    setBreads(prev => prev.map(bread => 
+      bread.id === id ? { ...bread, name } : bread
+    ));
+  };
+
+  const updateStock = (id, change) => {
+    setBreads(prev => prev.map(bread => {
+      if (bread.id === id) {
+        const newStock = Math.max(0, bread.stock + change);
+        return { ...bread, stock: newStock };
+      }
+      return bread;
+    }));
+  };
+
+  const deleteBread = (id) => {
+    setBreads(prev => prev.filter(bread => bread.id !== id));
+  };
+
+  const getExpirationTime = (deliveryTime) => {
+    const expiration = new Date(deliveryTime);
+    expiration.setHours(expiration.getHours() + 120); // 120時間後
+    return expiration;
+  };
+
+  const getTimeUntilExpiration = (deliveryTime) => {
+    const expiration = getExpirationTime(deliveryTime);
+    const now = currentTime;
+    const diff = expiration - now;
+    
+    if (diff <= 0) return { expired: true, text: '廃棄時間経過' };
+    
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    
+    if (hours < 24) {
+      return { 
+        expired: false, 
+        urgent: hours < 6,
+        text: `残り${hours}時間${minutes}分`
+      };
+    }
+    
+    const days = Math.floor(hours / 24);
+    const remainingHours = hours % 24;
+    return { 
+      expired: false, 
+      urgent: false,
+      text: `残り${days}日${remainingHours}時間`
+    };
+  };
+
+  const formatDateTime = (date) => {
+    return new Date(date).toLocaleString('ja-JP', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4">
+      <div className="max-w-4xl mx-auto">
+        {/* ヘッダー */}
+        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+          <h1 className="text-2xl font-bold text-gray-800 mb-4">パン在庫管理</h1>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+            >
+              <Camera size={20} />
+              パンを追加（写真撮影）
+            </button>
+            <div className="flex items-center gap-2 text-gray-600">
+              <Clock size={18} />
+              現在時刻: {formatDateTime(currentTime)}
+            </div>
+          </div>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handlePhotoCapture}
+            accept="image/*"
+            capture="environment"
+            style={{ display: 'none' }}
+          />
+        </div>
+
+        {/* パン一覧 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {breads.map((bread) => {
+            const timeInfo = getTimeUntilExpiration(bread.deliveryTime);
+            return (
+              <div key={bread.id} className="bg-white rounded-lg shadow-sm overflow-hidden">
+                {/* 写真 */}
+                <div className="aspect-video bg-gray-100">
+                  <img
+                    src={bread.photo}
+                    alt={bread.name || 'パン'}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+
+                {/* 情報エリア */}
+                <div className="p-4">
+                  {/* パン名入力 */}
+                  <input
+                    type="text"
+                    value={bread.name}
+                    onChange={(e) => updateBreadName(bread.id, e.target.value)}
+                    placeholder="パン名を入力"
+                    className="w-full text-lg font-medium border-b border-gray-200 focus:border-blue-500 outline-none pb-1 mb-3"
+                  />
+
+                  {/* 納品時刻 */}
+                  <div className="text-sm text-gray-600 mb-2">
+                    納品: {formatDateTime(bread.deliveryTime)}
+                  </div>
+
+                  {/* 廃棄期限 */}
+                  <div className={`text-sm font-medium mb-3 flex items-center gap-1 ${
+                    timeInfo.expired ? 'text-red-600' : 
+                    timeInfo.urgent ? 'text-orange-600' : 'text-gray-600'
+                  }`}>
+                    {(timeInfo.expired || timeInfo.urgent) && <AlertCircle size={16} />}
+                    廃棄期限: {timeInfo.text}
+                  </div>
+
+                  {/* 在庫管理 */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => updateStock(bread.id, -1)}
+                        disabled={bread.stock === 0}
+                        className="w-10 h-10 bg-red-100 hover:bg-red-200 disabled:bg-gray-100 disabled:cursor-not-allowed text-red-600 disabled:text-gray-400 rounded-full flex items-center justify-center transition-colors"
+                      >
+                        <Minus size={16} />
+                      </button>
+                      <span className="text-xl font-bold w-8 text-center">
+                        {bread.stock}
+                      </span>
+                      <button
+                        onClick={() => updateStock(bread.id, 1)}
+                        className="w-10 h-10 bg-green-100 hover:bg-green-200 text-green-600 rounded-full flex items-center justify-center transition-colors"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
+
+                    {/* 削除ボタン */}
+                    <button
+                      onClick={() => deleteBread(bread.id)}
+                      className="w-10 h-10 bg-gray-100 hover:bg-red-100 text-gray-600 hover:text-red-600 rounded-full flex items-center justify-center transition-colors"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 期限切れオーバーレイ */}
+                {timeInfo.expired && (
+                  <div className="absolute inset-0 bg-red-500 bg-opacity-75 flex items-center justify-center">
+                    <div className="bg-white px-4 py-2 rounded-lg text-red-600 font-bold">
+                      廃棄対象
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 空の状態 */}
+        {breads.length === 0 && (
+          <div className="text-center py-12">
+            <Camera size={48} className="mx-auto text-gray-400 mb-4" />
+            <p className="text-gray-600 text-lg">
+              写真を撮影してパンを追加してください
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default BreadInventoryApp;
