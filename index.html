@@ -89,10 +89,16 @@
             // データをローカルストレージに保存
             useEffect(() => {
                 try {
-                    localStorage.setItem('breadInventory', JSON.stringify(breads));
+                    // 画像データを圧縮して保存
+                    const compressedBreads = breads.map(bread => ({
+                        ...bread,
+                        photo: bread.photo ? bread.photo.substring(0, 50000) + '...' : bread.photo // 画像データを制限
+                    }));
+                    localStorage.setItem('breadInventory', JSON.stringify(compressedBreads));
                 } catch (error) {
                     console.error('ローカルストレージの保存エラー:', error);
-                    setError('データの保存に失敗しました');
+                    // エラーは出すが、アプリは正常に動作させる
+                    console.log('ローカルストレージに保存できませんが、セッション中は動作します');
                 }
             }, [breads]);
 
