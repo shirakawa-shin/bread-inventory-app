@@ -66,6 +66,31 @@
             </svg>
         );
 
+        // 画像圧縮関数
+        const compressImage = (file, maxWidth = 800, quality = 0.7) => {
+            return new Promise((resolve) => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const img = new Image();
+                
+                img.onload = () => {
+                    // アスペクト比を維持してリサイズ
+                    const ratio = Math.min(maxWidth / img.width, maxWidth / img.height);
+                    canvas.width = img.width * ratio;
+                    canvas.height = img.height * ratio;
+                    
+                    // 画像を描画
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    
+                    // 圧縮された画像データを取得
+                    const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+                    resolve(compressedDataUrl);
+                };
+                
+                img.src = URL.createObjectURL(file);
+            });
+        };
+
         const BreadInventoryApp = () => {
             const [breads, setBreads] = useState(() => {
                 try {
@@ -89,16 +114,11 @@
             // データをローカルストレージに保存
             useEffect(() => {
                 try {
-                    // 画像データを圧縮して保存
-                    const compressedBreads = breads.map(bread => ({
-                        ...bread,
-                        photo: bread.photo ? bread.photo.substring(0, 50000) + '...' : bread.photo // 画像データを制限
-                    }));
-                    localStorage.setItem('breadInventory', JSON.stringify(compressedBreads));
+                    localStorage.setItem('breadInventory', JSON.stringify(breads));
+                    console.log('データを正常に保存しました');
                 } catch (error) {
                     console.error('ローカルストレージの保存エラー:', error);
-                    // エラーは出すが、アプリは正常に動作させる
-                    console.log('ローカルストレージに保存できませんが、セッション中は動作します');
+                    // エラーは表示せず、ログのみ
                 }
             }, [breads]);
 
@@ -110,7 +130,7 @@
                 return () => clearInterval(timer);
             }, []);
 
-            const handlePhotoCapture = (event) => {
+            const handlePhotoCapture = async (event) => {
                 setError('');
                 setIsLoading(true);
                 
@@ -121,39 +141,25 @@
                         return;
                     }
 
-                    console.log('ファイル選択:', file.name, file.size);
+                    console.log('元のファイルサイズ:', Math.round(file.size / 1024), 'KB');
 
-                    const reader = new FileReader();
+                    // 画像を圧縮
+                    const compressedImage = await compressImage(file);
                     
-                    reader.onload = (e) => {
-                        try {
-                            console.log('ファイル読み込み完了');
-                            const newBread = {
-                                id: Date.now(),
-                                name: '',
-                                photo: e.target.result,
-                                deliveryTime: new Date(),
-                                stock: 1,
-                                expired: false
-                            };
-                            
-                            console.log('新しいパンを追加:', newBread.id);
-                            setBreads(prev => [...prev, newBread]);
-                            setIsLoading(false);
-                        } catch (error) {
-                            console.error('パン追加エラー:', error);
-                            setError('パンの追加に失敗しました');
-                            setIsLoading(false);
-                        }
-                    };
+                    console.log('圧縮後のデータサイズ:', Math.round(compressedImage.length / 1024), 'KB');
 
-                    reader.onerror = (error) => {
-                        console.error('ファイル読み込みエラー:', error);
-                        setError('画像の読み込みに失敗しました');
-                        setIsLoading(false);
+                    const newBread = {
+                        id: Date.now(),
+                        name: '',
+                        photo: compressedImage,
+                        deliveryTime: new Date(),
+                        stock: 1,
+                        expired: false
                     };
-
-                    reader.readAsDataURL(file);
+                    
+                    console.log('新しいパンを追加:', newBread.id);
+                    setBreads(prev => [...prev, newBread]);
+                    setIsLoading(false);
                 } catch (error) {
                     console.error('写真処理エラー:', error);
                     setError('写真の処理中にエラーが発生しました');
@@ -274,7 +280,7 @@
                         {/* ローディング表示 */}
                         {isLoading && (
                             <div className="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded mb-4">
-                                写真を処理中...
+                                📷 写真を圧縮・処理中...
                             </div>
                         )}
 
@@ -288,12 +294,15 @@
                                     className="flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white px-6 py-3 rounded-lg font-medium transition-colors"
                                 >
                                     <Camera size={20} />
-                                    {isLoading ? '処理中...' : 'パンを追加（写真撮影）'}
+                                    {isLoading ? '圧縮中...' : 'パンを追加（写真撮影）'}
                                 </button>
                                 <div className="flex items-center gap-2 text-gray-600">
                                     <Clock size={18} />
                                     現在時刻: {formatDateTime(currentTime)}
                                 </div>
+                            </div>
+                            <div className="mt-2 text-sm text-gray-500">
+                                📷 写真は自動で圧縮されます（品質向上 & 容量削減）
                             </div>
                             <input
                                 type="file"
@@ -405,6 +414,9 @@
                                 <Camera size={48} className="mx-auto text-gray-400 mb-4" />
                                 <p className="text-gray-600 text-lg">
                                     写真を撮影してパンを追加してください
+                                </p>
+                                <p className="text-gray-500 text-sm mt-2">
+                                    📷 写真は自動で最適化されます
                                 </p>
                             </div>
                         )}
