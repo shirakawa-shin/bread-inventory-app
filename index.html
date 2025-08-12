@@ -68,21 +68,32 @@
 
         const BreadInventoryApp = () => {
             const [breads, setBreads] = useState(() => {
-                const saved = localStorage.getItem('breadInventory');
-                if (saved) {
-                    return JSON.parse(saved).map(bread => ({
-                        ...bread,
-                        deliveryTime: new Date(bread.deliveryTime)
-                    }));
+                try {
+                    const saved = localStorage.getItem('breadInventory');
+                    if (saved) {
+                        return JSON.parse(saved).map(bread => ({
+                            ...bread,
+                            deliveryTime: new Date(bread.deliveryTime)
+                        }));
+                    }
+                } catch (error) {
+                    console.error('ローカルストレージの読み込みエラー:', error);
                 }
                 return [];
             });
             const [currentTime, setCurrentTime] = useState(new Date());
+            const [isLoading, setIsLoading] = useState(false);
+            const [error, setError] = useState('');
             const fileInputRef = useRef(null);
 
             // データをローカルストレージに保存
             useEffect(() => {
-                localStorage.setItem('breadInventory', JSON.stringify(breads));
+                try {
+                    localStorage.setItem('breadInventory', JSON.stringify(breads));
+                } catch (error) {
+                    console.error('ローカルストレージの保存エラー:', error);
+                    setError('データの保存に失敗しました');
+                }
             }, [breads]);
 
             // 現在時刻を1分ごとに更新
@@ -94,45 +105,95 @@
             }, []);
 
             const handlePhotoCapture = (event) => {
-                const file = event.target.files[0];
-                if (file) {
+                setError('');
+                setIsLoading(true);
+                
+                try {
+                    const file = event.target.files[0];
+                    if (!file) {
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    console.log('ファイル選択:', file.name, file.size);
+
                     const reader = new FileReader();
+                    
                     reader.onload = (e) => {
-                        const newBread = {
-                            id: Date.now(),
-                            name: '',
-                            photo: e.target.result,
-                            deliveryTime: new Date(),
-                            stock: 1,
-                            expired: false
-                        };
-                        setBreads(prev => [...prev, newBread]);
+                        try {
+                            console.log('ファイル読み込み完了');
+                            const newBread = {
+                                id: Date.now(),
+                                name: '',
+                                photo: e.target.result,
+                                deliveryTime: new Date(),
+                                stock: 1,
+                                expired: false
+                            };
+                            
+                            console.log('新しいパンを追加:', newBread.id);
+                            setBreads(prev => [...prev, newBread]);
+                            setIsLoading(false);
+                        } catch (error) {
+                            console.error('パン追加エラー:', error);
+                            setError('パンの追加に失敗しました');
+                            setIsLoading(false);
+                        }
                     };
+
+                    reader.onerror = (error) => {
+                        console.error('ファイル読み込みエラー:', error);
+                        setError('画像の読み込みに失敗しました');
+                        setIsLoading(false);
+                    };
+
                     reader.readAsDataURL(file);
+                } catch (error) {
+                    console.error('写真処理エラー:', error);
+                    setError('写真の処理中にエラーが発生しました');
+                    setIsLoading(false);
                 }
+
                 // ファイル入力をリセット
-                event.target.value = '';
+                if (event.target) {
+                    event.target.value = '';
+                }
             };
 
             const updateBreadName = (id, name) => {
-                setBreads(prev => prev.map(bread => 
-                    bread.id === id ? { ...bread, name } : bread
-                ));
+                try {
+                    setBreads(prev => prev.map(bread => 
+                        bread.id === id ? { ...bread, name } : bread
+                    ));
+                } catch (error) {
+                    console.error('パン名更新エラー:', error);
+                    setError('パン名の更新に失敗しました');
+                }
             };
 
             const updateStock = (id, change) => {
-                setBreads(prev => prev.map(bread => {
-                    if (bread.id === id) {
-                        const newStock = Math.max(0, bread.stock + change);
-                        return { ...bread, stock: newStock };
-                    }
-                    return bread;
-                }));
+                try {
+                    setBreads(prev => prev.map(bread => {
+                        if (bread.id === id) {
+                            const newStock = Math.max(0, bread.stock + change);
+                            return { ...bread, stock: newStock };
+                        }
+                        return bread;
+                    }));
+                } catch (error) {
+                    console.error('在庫更新エラー:', error);
+                    setError('在庫の更新に失敗しました');
+                }
             };
 
             const deleteBread = (id) => {
-                if (confirm('このパンを削除しますか？')) {
-                    setBreads(prev => prev.filter(bread => bread.id !== id));
+                try {
+                    if (confirm('このパンを削除しますか？')) {
+                        setBreads(prev => prev.filter(bread => bread.id !== id));
+                    }
+                } catch (error) {
+                    console.error('パン削除エラー:', error);
+                    setError('パンの削除に失敗しました');
                 }
             };
 
@@ -143,54 +204,85 @@
             };
 
             const getTimeUntilExpiration = (deliveryTime) => {
-                const expiration = getExpirationTime(deliveryTime);
-                const now = currentTime;
-                const diff = expiration - now;
-                
-                if (diff <= 0) return { expired: true, text: '廃棄時間経過' };
-                
-                const hours = Math.floor(diff / (1000 * 60 * 60));
-                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-                
-                if (hours < 24) {
+                try {
+                    const expiration = getExpirationTime(deliveryTime);
+                    const now = currentTime;
+                    const diff = expiration - now;
+                    
+                    if (diff <= 0) return { expired: true, text: '廃棄時間経過' };
+                    
+                    const hours = Math.floor(diff / (1000 * 60 * 60));
+                    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                    
+                    if (hours < 24) {
+                        return { 
+                            expired: false, 
+                            urgent: hours < 6,
+                            text: `残り${hours}時間${minutes}分`
+                        };
+                    }
+                    
+                    const days = Math.floor(hours / 24);
+                    const remainingHours = hours % 24;
                     return { 
                         expired: false, 
-                        urgent: hours < 6,
-                        text: `残り${hours}時間${minutes}分`
+                        urgent: false,
+                        text: `残り${days}日${remainingHours}時間`
                     };
+                } catch (error) {
+                    console.error('時間計算エラー:', error);
+                    return { expired: false, urgent: false, text: '計算エラー' };
                 }
-                
-                const days = Math.floor(hours / 24);
-                const remainingHours = hours % 24;
-                return { 
-                    expired: false, 
-                    urgent: false,
-                    text: `残り${days}日${remainingHours}時間`
-                };
             };
 
             const formatDateTime = (date) => {
-                return new Date(date).toLocaleString('ja-JP', {
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
+                try {
+                    return new Date(date).toLocaleString('ja-JP', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                } catch (error) {
+                    console.error('日時フォーマットエラー:', error);
+                    return '日時エラー';
+                }
             };
 
             return (
                 <div className="min-h-screen bg-gray-50 p-4">
                     <div className="max-w-4xl mx-auto">
+                        {/* エラー表示 */}
+                        {error && (
+                            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                                {error}
+                                <button 
+                                    onClick={() => setError('')}
+                                    className="float-right font-bold"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        )}
+
+                        {/* ローディング表示 */}
+                        {isLoading && (
+                            <div className="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded mb-4">
+                                写真を処理中...
+                            </div>
+                        )}
+
                         {/* ヘッダー */}
                         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
                             <h1 className="text-2xl font-bold text-gray-800 mb-4">パン在庫管理</h1>
                             <div className="flex flex-col sm:flex-row gap-4">
                                 <button
                                     onClick={() => fileInputRef.current?.click()}
-                                    className="flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+                                    disabled={isLoading}
+                                    className="flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white px-6 py-3 rounded-lg font-medium transition-colors"
                                 >
                                     <Camera size={20} />
-                                    パンを追加（写真撮影）
+                                    {isLoading ? '処理中...' : 'パンを追加（写真撮影）'}
                                 </button>
                                 <div className="flex items-center gap-2 text-gray-600">
                                     <Clock size={18} />
@@ -215,11 +307,21 @@
                                     <div key={bread.id} className="bg-white rounded-lg shadow-sm overflow-hidden relative">
                                         {/* 写真 */}
                                         <div className="aspect-video bg-gray-100">
-                                            <img
-                                                src={bread.photo}
-                                                alt={bread.name || 'パン'}
-                                                className="w-full h-full object-cover"
-                                            />
+                                            {bread.photo ? (
+                                                <img
+                                                    src={bread.photo}
+                                                    alt={bread.name || 'パン'}
+                                                    className="w-full h-full object-cover"
+                                                    onError={(e) => {
+                                                        console.error('画像表示エラー:', e);
+                                                        e.target.style.display = 'none';
+                                                    }}
+                                                />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center text-gray-500">
+                                                    画像なし
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* 情報エリア */}
@@ -292,7 +394,7 @@
                         </div>
 
                         {/* 空の状態 */}
-                        {breads.length === 0 && (
+                        {breads.length === 0 && !isLoading && (
                             <div className="text-center py-12">
                                 <Camera size={48} className="mx-auto text-gray-400 mb-4" />
                                 <p className="text-gray-600 text-lg">
