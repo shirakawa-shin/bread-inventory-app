@@ -395,11 +395,18 @@
                                             </div>
                                         </div>
 
-                                        {/* 期限切れオーバーレイ */}
+                                        {/* 期限切れオーバーレイ（写真部分のみ） */}
                                         {timeInfo.expired && (
-                                            <div className="absolute inset-0 bg-red-500 bg-opacity-75 flex items-center justify-center">
-                                                <div className="bg-white px-4 py-2 rounded-lg text-red-600 font-bold">
+                                            <div className="absolute top-0 left-0 right-0 h-48 bg-red-500 bg-opacity-75 flex items-center justify-center">
+                                                <div className="bg-white px-4 py-2 rounded-lg text-red-600 font-bold flex items-center gap-2">
                                                     廃棄対象
+                                                    <button
+                                                        onClick={() => deleteBread(bread.id)}
+                                                        className="ml-2 w-8 h-8 bg-red-600 hover:bg-red-700 text-white rounded-full flex items-center justify-center transition-colors"
+                                                        title="削除"
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
                                                 </div>
                                             </div>
                                         )}
