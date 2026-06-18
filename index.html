@@ -154,6 +154,7 @@
                         name: '',
                         photo: compressedImage,
                         deliveryTime: new Date(),
+                        expirationHours: 120, // 日持ち（時間）。既定は5日＝120時間
                         stock: 1,
                         expired: false
                     };
@@ -210,15 +211,26 @@
                 }
             };
 
-            const getExpirationTime = (deliveryTime) => {
+            const updateExpiration = (id, hours) => {
+                try {
+                    setBreads(prev => prev.map(bread =>
+                        bread.id === id ? { ...bread, expirationHours: hours } : bread
+                    ));
+                } catch (error) {
+                    console.error('日持ち更新エラー:', error);
+                    setError('日持ちの更新に失敗しました');
+                }
+            };
+
+            const getExpirationTime = (deliveryTime, expirationHours = 120) => {
                 const expiration = new Date(deliveryTime);
-                expiration.setHours(expiration.getHours() + 120); // 120時間後
+                expiration.setHours(expiration.getHours() + expirationHours);
                 return expiration;
             };
 
-            const getTimeUntilExpiration = (deliveryTime) => {
+            const getTimeUntilExpiration = (deliveryTime, expirationHours = 120) => {
                 try {
-                    const expiration = getExpirationTime(deliveryTime);
+                    const expiration = getExpirationTime(deliveryTime, expirationHours);
                     const now = currentTime;
                     const diff = expiration - now;
                     
@@ -318,7 +330,7 @@
                         {/* パン一覧 */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {breads.map((bread) => {
-                                const timeInfo = getTimeUntilExpiration(bread.deliveryTime);
+                                const timeInfo = getTimeUntilExpiration(bread.deliveryTime, bread.expirationHours ?? 120);
                                 return (
                                     <div key={bread.id} className="bg-white rounded-lg shadow-sm overflow-hidden relative">
                                         {/* 写真 */}
@@ -354,6 +366,26 @@
                                             {/* 納品時刻 */}
                                             <div className="text-sm text-gray-600 mb-2">
                                                 納品: {formatDateTime(bread.deliveryTime)}
+                                            </div>
+
+                                            {/* 日持ち（廃棄までの日数）設定 */}
+                                            <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
+                                                <span>日持ち:</span>
+                                                <select
+                                                    value={bread.expirationHours ?? 120}
+                                                    onChange={(e) => updateExpiration(bread.id, Number(e.target.value))}
+                                                    className="border border-gray-200 rounded px-2 py-1 text-sm focus:border-blue-500 outline-none bg-white"
+                                                >
+                                                    <option value={24}>1日</option>
+                                                    <option value={48}>2日</option>
+                                                    <option value={72}>3日</option>
+                                                    <option value={96}>4日</option>
+                                                    <option value={120}>5日</option>
+                                                    <option value={144}>6日</option>
+                                                    <option value={168}>7日</option>
+                                                    <option value={240}>10日</option>
+                                                    <option value={336}>14日</option>
+                                                </select>
                                             </div>
 
                                             {/* 廃棄期限 */}
