@@ -92,205 +92,488 @@
             });
         };
 
-        const BreadInventoryApp = () => {
-            const [breads, setBreads] = useState(() => {
+        const Pencil = ({ size = 24 }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+            </svg>
+        );
+
+        const Package = ({ size = 24 }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m7.5 4.27 9 5.15"/>
+                <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>
+                <path d="m3.3 7 8.7 5 8.7-5"/>
+                <path d="M12 22V12"/>
+            </svg>
+        );
+
+        // ===== アレルゲン =====
+        // 特定原材料（表示義務 9品目：2025年度にカシューナッツが追加）
+        const ALLERGENS_REQUIRED = ['小麦', '卵', '乳', 'えび', 'かに', 'くるみ', 'そば', '落花生', 'カシューナッツ'];
+        // 特定原材料に準ずるもの（表示推奨 20品目）
+        const ALLERGENS_RECOMMENDED = [
+            'アーモンド', 'あわび', 'いか', 'いくら', 'オレンジ', 'キウイフルーツ', '牛肉', 'ごま', 'さけ', 'さば',
+            '大豆', '鶏肉', 'バナナ', '豚肉', 'マカダミアナッツ', 'もも', 'やまいも', 'りんご', 'ゼラチン', 'ピスタチオ'
+        ];
+
+        const DAY_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 10, 14];
+
+        // ===== 保存まわり =====
+        const STORAGE_INVENTORY = 'breadInventory';
+        const STORAGE_MASTER = 'breadMaster';
+
+        const loadJSON = (key, fallback) => {
+            try {
+                const saved = localStorage.getItem(key);
+                return saved ? JSON.parse(saved) : fallback;
+            } catch (e) {
+                console.error('読み込みエラー:', key, e);
+                return fallback;
+            }
+        };
+
+        const saveJSON = (key, value) => {
+            try {
+                localStorage.setItem(key, JSON.stringify(value));
+                return true;
+            } catch (e) {
+                console.error('保存エラー:', key, e);
+                return false;
+            }
+        };
+
+        const newId = () => Date.now() + Math.floor(Math.random() * 1000);
+
+        const toLocalInputValue = (date) => {
+            const d = new Date(date);
+            const pad = (n) => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        };
+
+        const formatDateTime = (date) => {
+            try {
+                return new Date(date).toLocaleString('ja-JP', {
+                    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+                });
+            } catch (e) {
+                return '日時エラー';
+            }
+        };
+
+        // ===== 小さな部品 =====
+        const AllergenChips = ({ allergens }) => {
+            if (!allergens || allergens.length === 0) {
+                return <div className="text-xs text-gray-400">アレルゲン登録なし</div>;
+            }
+            return (
+                <div className="flex flex-wrap gap-1">
+                    {allergens.map(a => (
+                        <span key={a} className={`text-xs px-2 py-0.5 rounded-full border ${
+                            ALLERGENS_REQUIRED.includes(a)
+                                ? 'bg-amber-50 border-amber-300 text-amber-800'
+                                : 'bg-gray-50 border-gray-300 text-gray-700'
+                        }`}>{a}</span>
+                    ))}
+                </div>
+            );
+        };
+
+        const Modal = ({ title, onClose, children, footer }) => (
+            <div className="fixed inset-0 z-50 bg-black bg-opacity-40 flex items-end sm:items-center justify-center" onClick={onClose}>
+                <div className="bg-white w-full sm:max-w-lg max-h-[90vh] rounded-t-2xl sm:rounded-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center justify-between px-5 py-4 border-b">
+                        <h2 className="text-lg font-bold text-gray-800">{title}</h2>
+                        <button onClick={onClose} className="text-gray-500 text-2xl leading-none px-2" aria-label="閉じる">×</button>
+                    </div>
+                    <div className="overflow-y-auto px-5 py-4 flex-1">{children}</div>
+                    {footer && <div className="px-5 py-4 border-t">{footer}</div>}
+                </div>
+            </div>
+        );
+
+        // ===== マスタ編集フォーム =====
+        const MasterForm = ({ initial, onSave, onCancel, setError }) => {
+            const [name, setName] = useState(initial?.name || '');
+            const [days, setDays] = useState(initial?.expirationDays ?? 5);
+            const [photo, setPhoto] = useState(initial?.photo || null);
+            const [allergens, setAllergens] = useState(initial?.allergens || []);
+            const [busy, setBusy] = useState(false);
+            const photoRef = useRef(null);
+            const showRecommendedInit = (initial?.allergens || []).some(a => ALLERGENS_RECOMMENDED.includes(a));
+
+            const toggle = (a) => setAllergens(prev =>
+                prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a]
+            );
+
+            const onPhoto = async (e) => {
+                const file = e.target.files[0];
+                e.target.value = '';
+                if (!file) return;
+                setBusy(true);
                 try {
-                    const saved = localStorage.getItem('breadInventory');
-                    if (saved) {
-                        return JSON.parse(saved).map(bread => ({
-                            ...bread,
-                            deliveryTime: new Date(bread.deliveryTime)
-                        }));
-                    }
-                } catch (error) {
-                    console.error('ローカルストレージの読み込みエラー:', error);
+                    setPhoto(await compressImage(file, 600, 0.7));
+                } catch (err) {
+                    setError('写真の処理中にエラーが発生しました');
                 }
-                return [];
+                setBusy(false);
+            };
+
+            const submit = () => {
+                if (!name.trim()) {
+                    setError('パン名を入力してください');
+                    return;
+                }
+                const order = [...ALLERGENS_REQUIRED, ...ALLERGENS_RECOMMENDED];
+                onSave({
+                    id: initial?.id ?? newId(),
+                    name: name.trim(),
+                    expirationDays: Number(days),
+                    photo,
+                    allergens: [...allergens].sort((a, b) => order.indexOf(a) - order.indexOf(b))
+                });
+            };
+
+            const chip = (a, required) => (
+                <label key={a} className={`text-sm px-3 py-1.5 rounded-full border cursor-pointer select-none ${
+                    allergens.includes(a)
+                        ? (required ? 'bg-amber-500 border-amber-500 text-white' : 'bg-gray-700 border-gray-700 text-white')
+                        : 'bg-white border-gray-300 text-gray-700'
+                }`}>
+                    <input type="checkbox" className="hidden" checked={allergens.includes(a)} onChange={() => toggle(a)} />
+                    {a}
+                </label>
+            );
+
+            return (
+                <Modal
+                    title={initial ? 'マスタを編集' : 'マスタに登録'}
+                    onClose={onCancel}
+                    footer={
+                        <div className="flex gap-3">
+                            <button onClick={onCancel} className="flex-1 py-3 rounded-lg border border-gray-300 text-gray-700">キャンセル</button>
+                            <button onClick={submit} disabled={busy} className="flex-1 py-3 rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-medium">保存</button>
+                        </div>
+                    }
+                >
+                    <div className="space-y-5">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">パン名（必須）</label>
+                            <input
+                                type="text" value={name} onChange={e => setName(e.target.value)}
+                                placeholder="例：クロワッサン"
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:border-blue-500 outline-none"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">日持ち</label>
+                            <select
+                                value={days} onChange={e => setDays(Number(e.target.value))}
+                                className="border border-gray-300 rounded-lg px-3 py-2 bg-white focus:border-blue-500 outline-none"
+                            >
+                                {DAY_OPTIONS.map(d => <option key={d} value={d}>{d}日</option>)}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">写真</label>
+                            <div className="flex items-center gap-3">
+                                <div className="w-24 h-24 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center text-gray-400 text-xs">
+                                    {photo ? <img src={photo} className="w-full h-full object-cover" /> : '写真なし'}
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                    <button onClick={() => photoRef.current?.click()} disabled={busy}
+                                        className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm">
+                                        <Camera size={16} /> {busy ? '圧縮中...' : (photo ? '撮り直す' : '撮影・選択')}
+                                    </button>
+                                    {photo && (
+                                        <button onClick={() => setPhoto(null)} className="text-sm text-red-600 text-left px-1">写真を外す</button>
+                                    )}
+                                </div>
+                            </div>
+                            <input type="file" ref={photoRef} onChange={onPhoto} accept="image/*" capture="environment" style={{ display: 'none' }} />
+                        </div>
+
+                        <div>
+                            <div className="text-sm font-medium text-gray-700 mb-2">アレルゲン（特定原材料）</div>
+                            <div className="flex flex-wrap gap-2">
+                                {ALLERGENS_REQUIRED.map(a => chip(a, true))}
+                            </div>
+                            <details className="mt-3" open={showRecommendedInit}>
+                                <summary className="text-sm text-gray-600 cursor-pointer">特定原材料に準ずるもの（推奨20品目）</summary>
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                    {ALLERGENS_RECOMMENDED.map(a => chip(a, false))}
+                                </div>
+                            </details>
+                        </div>
+                    </div>
+                </Modal>
+            );
+        };
+
+        // ===== 入荷登録（マスタから選択） =====
+        const ReceiveModal = ({ masters, onReceive, onClose, onGoMaster }) => {
+            const [qty, setQty] = useState({}); // masterId -> 数量
+            const [query, setQuery] = useState('');
+            const [deliveryTime, setDeliveryTime] = useState(toLocalInputValue(new Date()));
+
+            const change = (id, delta) => setQty(prev => {
+                const v = Math.max(0, (prev[id] || 0) + delta);
+                return { ...prev, [id]: v };
             });
+
+            const filtered = masters.filter(m => m.name.includes(query.trim()));
+            const selected = masters.filter(m => (qty[m.id] || 0) > 0);
+            const total = selected.reduce((s, m) => s + qty[m.id], 0);
+
+            const submit = () => {
+                if (selected.length === 0) return;
+                onReceive(selected.map(m => ({ master: m, stock: qty[m.id] })), new Date(deliveryTime));
+            };
+
+            return (
+                <Modal
+                    title="入荷を登録"
+                    onClose={onClose}
+                    footer={
+                        <button onClick={submit} disabled={selected.length === 0}
+                            className="w-full py-3 rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white font-medium">
+                            {selected.length === 0 ? '入荷するパンを選んでください' : `${selected.length}品目・${total}個を入荷`}
+                        </button>
+                    }
+                >
+                    {masters.length === 0 ? (
+                        <div className="text-center py-8 text-gray-600">
+                            <p>マスタにパンが登録されていません。</p>
+                            <button onClick={onGoMaster} className="mt-4 px-4 py-2 rounded-lg bg-blue-500 text-white">マスタを登録する</button>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            <div className="flex flex-col sm:flex-row gap-2">
+                                <input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="パン名で検索"
+                                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:border-blue-500 outline-none" />
+                                <input type="datetime-local" value={deliveryTime} onChange={e => setDeliveryTime(e.target.value)}
+                                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-blue-500 outline-none" title="納品日時" />
+                            </div>
+                            {filtered.map(m => {
+                                const n = qty[m.id] || 0;
+                                return (
+                                    <div key={m.id} className={`flex items-center gap-3 p-2 rounded-lg border ${n > 0 ? 'border-blue-400 bg-blue-50' : 'border-gray-200'}`}>
+                                        <div className="w-14 h-14 rounded bg-gray-100 overflow-hidden flex-shrink-0">
+                                            {m.photo && <img src={m.photo} className="w-full h-full object-cover" />}
+                                        </div>
+                                        <div className="flex-1 min-w-0" onClick={() => n === 0 && change(m.id, 1)}>
+                                            <div className="font-medium text-gray-800 truncate">{m.name}</div>
+                                            <div className="text-xs text-gray-500">日持ち {m.expirationDays}日</div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={() => change(m.id, -1)} disabled={n === 0}
+                                                className="w-9 h-9 rounded-full bg-gray-100 disabled:text-gray-300 flex items-center justify-center"><Minus size={14} /></button>
+                                            <span className="w-6 text-center font-bold">{n}</span>
+                                            <button onClick={() => change(m.id, 1)}
+                                                className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center"><Plus size={14} /></button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            {filtered.length === 0 && <p className="text-sm text-gray-500 text-center py-4">該当するパンがありません</p>}
+                        </div>
+                    )}
+                </Modal>
+            );
+        };
+
+        // ===== メインアプリ =====
+        const BreadInventoryApp = () => {
+            const [tab, setTab] = useState('inventory');
+            const [breads, setBreads] = useState(() =>
+                loadJSON(STORAGE_INVENTORY, []).map(b => ({ ...b, deliveryTime: new Date(b.deliveryTime) }))
+            );
+            const [masters, setMasters] = useState(() => loadJSON(STORAGE_MASTER, []));
             const [currentTime, setCurrentTime] = useState(new Date());
             const [isLoading, setIsLoading] = useState(false);
             const [error, setError] = useState('');
+            const [showReceive, setShowReceive] = useState(false);
+            const [editingMaster, setEditingMaster] = useState(null); // null | 'new' | master | {fromBread}
             const fileInputRef = useRef(null);
+            const importRef = useRef(null);
 
-            // データをローカルストレージに保存
             useEffect(() => {
-                try {
-                    localStorage.setItem('breadInventory', JSON.stringify(breads));
-                    console.log('データを正常に保存しました');
-                } catch (error) {
-                    console.error('ローカルストレージの保存エラー:', error);
-                    // エラーは表示せず、ログのみ
+                if (!saveJSON(STORAGE_INVENTORY, breads)) {
+                    setError('在庫データを保存できませんでした（端末の保存容量不足の可能性があります）');
                 }
             }, [breads]);
 
-            // 現在時刻を1分ごとに更新
             useEffect(() => {
-                const timer = setInterval(() => {
-                    setCurrentTime(new Date());
-                }, 60000);
+                if (!saveJSON(STORAGE_MASTER, masters)) {
+                    setError('マスタを保存できませんでした（端末の保存容量不足の可能性があります）。写真の多いパンを整理してください');
+                }
+            }, [masters]);
+
+            useEffect(() => {
+                const timer = setInterval(() => setCurrentTime(new Date()), 60000);
                 return () => clearInterval(timer);
             }, []);
 
+            const masterById = (id) => masters.find(m => m.id === id);
+
+            // 在庫カードに表示する情報（マスタ紐付きならマスタの最新情報を使う）
+            const viewOf = (bread) => {
+                const m = bread.masterId != null ? masterById(bread.masterId) : null;
+                return {
+                    name: m ? m.name : bread.name,
+                    photo: m ? m.photo : bread.photo,
+                    allergens: m ? m.allergens : (bread.allergens || []),
+                    isTemp: bread.masterId == null,
+                    masterMissing: bread.masterId != null && !m
+                };
+            };
+
+            // ----- 入荷 -----
+            const receive = (items, deliveryTime) => {
+                const lots = items.map(({ master, stock }, i) => ({
+                    id: newId() + i,
+                    masterId: master.id,
+                    name: master.name,               // マスタ削除時の控え
+                    allergens: master.allergens,     // マスタ削除時の控え
+                    deliveryTime,
+                    expirationHours: master.expirationDays * 24,
+                    stock
+                }));
+                setBreads(prev => [...prev, ...lots]);
+                setShowReceive(false);
+            };
+
             const handlePhotoCapture = async (event) => {
                 setError('');
+                const file = event.target.files[0];
+                if (event.target) event.target.value = '';
+                if (!file) return;
                 setIsLoading(true);
-                
                 try {
-                    const file = event.target.files[0];
-                    if (!file) {
-                        setIsLoading(false);
-                        return;
-                    }
-
-                    console.log('元のファイルサイズ:', Math.round(file.size / 1024), 'KB');
-
-                    // 画像を圧縮
                     const compressedImage = await compressImage(file);
-                    
-                    console.log('圧縮後のデータサイズ:', Math.round(compressedImage.length / 1024), 'KB');
-
-                    const newBread = {
-                        id: Date.now(),
+                    setBreads(prev => [...prev, {
+                        id: newId(),
+                        masterId: null,
                         name: '',
                         photo: compressedImage,
+                        allergens: [],
                         deliveryTime: new Date(),
-                        expirationHours: 120, // 日持ち（時間）。既定は5日＝120時間
-                        stock: 1,
-                        expired: false
-                    };
-                    
-                    console.log('新しいパンを追加:', newBread.id);
-                    setBreads(prev => [...prev, newBread]);
-                    setIsLoading(false);
-                } catch (error) {
-                    console.error('写真処理エラー:', error);
+                        expirationHours: 120,
+                        stock: 1
+                    }]);
+                } catch (e) {
+                    console.error('写真処理エラー:', e);
                     setError('写真の処理中にエラーが発生しました');
-                    setIsLoading(false);
                 }
-
-                // ファイル入力をリセット
-                if (event.target) {
-                    event.target.value = '';
-                }
+                setIsLoading(false);
             };
 
-            const updateBreadName = (id, name) => {
-                try {
-                    setBreads(prev => prev.map(bread => 
-                        bread.id === id ? { ...bread, name } : bread
-                    ));
-                } catch (error) {
-                    console.error('パン名更新エラー:', error);
-                    setError('パン名の更新に失敗しました');
-                }
-            };
+            const updateBread = (id, patch) =>
+                setBreads(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
 
-            const updateStock = (id, change) => {
-                try {
-                    setBreads(prev => prev.map(bread => {
-                        if (bread.id === id) {
-                            const newStock = Math.max(0, bread.stock + change);
-                            return { ...bread, stock: newStock };
-                        }
-                        return bread;
-                    }));
-                } catch (error) {
-                    console.error('在庫更新エラー:', error);
-                    setError('在庫の更新に失敗しました');
-                }
-            };
+            const updateStock = (id, change) =>
+                setBreads(prev => prev.map(b => b.id === id ? { ...b, stock: Math.max(0, b.stock + change) } : b));
 
             const deleteBread = (id) => {
-                try {
-                    if (confirm('このパンを削除しますか？')) {
-                        setBreads(prev => prev.filter(bread => bread.id !== id));
-                    }
-                } catch (error) {
-                    console.error('パン削除エラー:', error);
-                    setError('パンの削除に失敗しました');
+                if (confirm('このパンを削除しますか？')) {
+                    setBreads(prev => prev.filter(b => b.id !== id));
                 }
             };
 
-            const updateExpiration = (id, hours) => {
-                try {
-                    setBreads(prev => prev.map(bread =>
-                        bread.id === id ? { ...bread, expirationHours: hours } : bread
-                    ));
-                } catch (error) {
-                    console.error('日持ち更新エラー:', error);
-                    setError('日持ちの更新に失敗しました');
+            const deleteExpired = () => {
+                const expired = breads.filter(b => getTimeUntilExpiration(b).expired);
+                if (expired.length === 0) return;
+                if (confirm(`廃棄対象の ${expired.length} 件をまとめて削除しますか？`)) {
+                    const ids = new Set(expired.map(b => b.id));
+                    setBreads(prev => prev.filter(b => !ids.has(b.id)));
                 }
             };
 
-            const getExpirationTime = (deliveryTime, expirationHours = 120) => {
-                const expiration = new Date(deliveryTime);
-                expiration.setHours(expiration.getHours() + expirationHours);
-                return expiration;
+            // ----- マスタ -----
+            const saveMaster = (master, fromBreadId) => {
+                setMasters(prev => prev.some(m => m.id === master.id)
+                    ? prev.map(m => m.id === master.id ? master : m)
+                    : [...prev, master]);
+                if (fromBreadId != null) {
+                    // 臨時入荷のパンをマスタに紐付け（写真はマスタ側へ移す）
+                    setBreads(prev => prev.map(b => b.id === fromBreadId
+                        ? { ...b, masterId: master.id, name: master.name, allergens: master.allergens, photo: undefined }
+                        : b));
+                }
+                setEditingMaster(null);
             };
 
-            const getTimeUntilExpiration = (deliveryTime, expirationHours = 120) => {
-                try {
-                    const expiration = getExpirationTime(deliveryTime, expirationHours);
-                    const now = currentTime;
-                    const diff = expiration - now;
-                    
-                    if (diff <= 0) return { expired: true, text: '廃棄時間経過' };
-                    
-                    const hours = Math.floor(diff / (1000 * 60 * 60));
-                    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-                    
-                    if (hours < 24) {
-                        return { 
-                            expired: false, 
-                            urgent: hours < 6,
-                            text: `残り${hours}時間${minutes}分`
-                        };
-                    }
-                    
-                    const days = Math.floor(hours / 24);
-                    const remainingHours = hours % 24;
-                    return { 
-                        expired: false, 
-                        urgent: false,
-                        text: `残り${days}日${remainingHours}時間`
-                    };
-                } catch (error) {
-                    console.error('時間計算エラー:', error);
-                    return { expired: false, urgent: false, text: '計算エラー' };
+            const deleteMaster = (master) => {
+                const inUse = breads.filter(b => b.masterId === master.id).length;
+                const msg = inUse > 0
+                    ? `「${master.name}」をマスタから削除しますか？\n在庫中の ${inUse} 件は名前・アレルゲンを残したまま表示されます（写真は消えます）。`
+                    : `「${master.name}」をマスタから削除しますか？`;
+                if (confirm(msg)) {
+                    setMasters(prev => prev.filter(m => m.id !== master.id));
                 }
             };
 
-            const formatDateTime = (date) => {
+            const exportData = () => {
+                const data = { version: 2, exportedAt: new Date().toISOString(), masters, inventory: breads };
+                const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `bread-inventory-${toLocalInputValue(new Date()).slice(0, 10)}.json`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+            };
+
+            const importData = async (e) => {
+                const file = e.target.files[0];
+                e.target.value = '';
+                if (!file) return;
                 try {
-                    return new Date(date).toLocaleString('ja-JP', {
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    });
-                } catch (error) {
-                    console.error('日時フォーマットエラー:', error);
-                    return '日時エラー';
+                    const data = JSON.parse(await file.text());
+                    if (!Array.isArray(data.masters)) throw new Error('形式が違います');
+                    const withInv = Array.isArray(data.inventory);
+                    if (!confirm(`マスタ ${data.masters.length} 件${withInv ? `・在庫 ${data.inventory.length} 件` : ''}で、今のデータを置き換えますか？`)) return;
+                    setMasters(data.masters);
+                    if (withInv) setBreads(data.inventory.map(b => ({ ...b, deliveryTime: new Date(b.deliveryTime) })));
+                } catch (err) {
+                    setError('バックアップファイルを読み込めませんでした');
                 }
             };
+
+            // ----- 期限計算 -----
+            const getExpirationTime = (bread) =>
+                new Date(new Date(bread.deliveryTime).getTime() + (bread.expirationHours ?? 120) * 3600 * 1000);
+
+            const getTimeUntilExpiration = (bread) => {
+                const diff = getExpirationTime(bread) - currentTime;
+                if (diff <= 0) return { expired: true, urgent: false, text: '廃棄時間経過' };
+                const hours = Math.floor(diff / 3600000);
+                const minutes = Math.floor((diff % 3600000) / 60000);
+                if (hours < 24) return { expired: false, urgent: hours < 6, text: `残り${hours}時間${minutes}分` };
+                return { expired: false, urgent: false, text: `残り${Math.floor(hours / 24)}日${hours % 24}時間` };
+            };
+
+            // 期限が近い順に並べる
+            const sortedBreads = [...breads].sort((a, b) => getExpirationTime(a) - getExpirationTime(b));
+            const expiredCount = breads.filter(b => getTimeUntilExpiration(b).expired).length;
+            const sortedMasters = [...masters].sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+
+            const tabBtn = (key, label) => (
+                <button onClick={() => setTab(key)}
+                    className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
+                        tab === key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-600'
+                    }`}>{label}</button>
+            );
 
             return (
                 <div className="min-h-screen bg-gray-50 p-4">
                     <div className="max-w-4xl mx-auto">
-                        {/* エラー表示 */}
                         {error && (
                             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
                                 {error}
-                                <button 
-                                    onClick={() => setError('')}
-                                    className="float-right font-bold"
-                                >
-                                    ×
-                                </button>
+                                <button onClick={() => setError('')} className="float-right font-bold">×</button>
                             </div>
                         )}
-
-                        {/* ローディング表示 */}
                         {isLoading && (
                             <div className="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded mb-4">
                                 📷 写真を圧縮・処理中...
@@ -299,173 +582,231 @@
 
                         {/* ヘッダー */}
                         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-                            <h1 className="text-2xl font-bold text-gray-800 mb-4">パン在庫管理</h1>
-                            <div className="flex flex-col sm:flex-row gap-4">
-                                <button
-                                    onClick={() => fileInputRef.current?.click()}
-                                    disabled={isLoading}
-                                    className="flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-                                >
-                                    <Camera size={20} />
-                                    {isLoading ? '圧縮中...' : 'パンを追加（写真撮影）'}
-                                </button>
-                                <div className="flex items-center gap-2 text-gray-600">
-                                    <Clock size={18} />
-                                    現在時刻: {formatDateTime(currentTime)}
+                            <div className="flex items-center justify-between mb-4">
+                                <h1 className="text-2xl font-bold text-gray-800">パン在庫管理</h1>
+                                <div className="flex items-center gap-1 text-sm text-gray-600">
+                                    <Clock size={16} /> {formatDateTime(currentTime)}
                                 </div>
                             </div>
-                            <div className="mt-2 text-sm text-gray-500">
-                                📷 写真は自動で圧縮されます（品質向上 & 容量削減）
+                            <div className="flex bg-gray-100 rounded-lg p-1 mb-4">
+                                {tabBtn('inventory', `在庫（${breads.length}）`)}
+                                {tabBtn('master', `マスタ（${masters.length}）`)}
                             </div>
-                            <input
-                                type="file"
-                                ref={fileInputRef}
-                                onChange={handlePhotoCapture}
-                                accept="image/*"
-                                capture="environment"
-                                style={{ display: 'none' }}
-                            />
+
+                            {tab === 'inventory' ? (
+                                <div className="flex flex-col sm:flex-row gap-3">
+                                    <button onClick={() => setShowReceive(true)}
+                                        className="flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium transition-colors">
+                                        <Package size={20} /> 入荷を登録（マスタから選択）
+                                    </button>
+                                    <button onClick={() => fileInputRef.current?.click()} disabled={isLoading}
+                                        className="flex items-center justify-center gap-2 border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-3 rounded-lg transition-colors">
+                                        <Camera size={18} /> {isLoading ? '圧縮中...' : '臨時入荷（写真撮影）'}
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col sm:flex-row gap-3">
+                                    <button onClick={() => setEditingMaster('new')}
+                                        className="flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium transition-colors">
+                                        <Plus size={20} /> パンをマスタに登録
+                                    </button>
+                                    <div className="flex gap-2">
+                                        <button onClick={exportData} className="flex-1 px-4 py-3 rounded-lg border border-gray-300 text-gray-700 text-sm hover:bg-gray-50">バックアップ保存</button>
+                                        <button onClick={() => importRef.current?.click()} className="flex-1 px-4 py-3 rounded-lg border border-gray-300 text-gray-700 text-sm hover:bg-gray-50">バックアップ読込</button>
+                                    </div>
+                                </div>
+                            )}
+                            <input type="file" ref={fileInputRef} onChange={handlePhotoCapture} accept="image/*" capture="environment" style={{ display: 'none' }} />
+                            <input type="file" ref={importRef} onChange={importData} accept="application/json,.json" style={{ display: 'none' }} />
                         </div>
 
-                        {/* パン一覧 */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {breads.map((bread) => {
-                                const timeInfo = getTimeUntilExpiration(bread.deliveryTime, bread.expirationHours ?? 120);
-                                return (
-                                    <div key={bread.id} className="bg-white rounded-lg shadow-sm overflow-hidden relative">
-                                        {/* 写真 */}
-                                        <div className="aspect-video bg-gray-100">
-                                            {bread.photo ? (
-                                                <img
-                                                    src={bread.photo}
-                                                    alt={bread.name || 'パン'}
-                                                    className="w-full h-full object-cover"
-                                                    onError={(e) => {
-                                                        console.error('画像表示エラー:', e);
-                                                        e.target.style.display = 'none';
-                                                    }}
-                                                />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center text-gray-500">
-                                                    画像なし
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* 情報エリア */}
-                                        <div className="p-4">
-                                            {/* パン名入力 */}
-                                            <input
-                                                type="text"
-                                                value={bread.name}
-                                                onChange={(e) => updateBreadName(bread.id, e.target.value)}
-                                                placeholder="パン名を入力"
-                                                className="w-full text-lg font-medium border-b border-gray-200 focus:border-blue-500 outline-none pb-1 mb-3"
-                                            />
-
-                                            {/* 納品時刻 */}
-                                            <div className="text-sm text-gray-600 mb-2">
-                                                納品: {formatDateTime(bread.deliveryTime)}
-                                            </div>
-
-                                            {/* 日持ち（廃棄までの日数）設定 */}
-                                            <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
-                                                <span>日持ち:</span>
-                                                <select
-                                                    value={bread.expirationHours ?? 120}
-                                                    onChange={(e) => updateExpiration(bread.id, Number(e.target.value))}
-                                                    className="border border-gray-200 rounded px-2 py-1 text-sm focus:border-blue-500 outline-none bg-white"
-                                                >
-                                                    <option value={24}>1日</option>
-                                                    <option value={48}>2日</option>
-                                                    <option value={72}>3日</option>
-                                                    <option value={96}>4日</option>
-                                                    <option value={120}>5日</option>
-                                                    <option value={144}>6日</option>
-                                                    <option value={168}>7日</option>
-                                                    <option value={240}>10日</option>
-                                                    <option value={336}>14日</option>
-                                                </select>
-                                            </div>
-
-                                            {/* 廃棄期限 */}
-                                            <div className={`text-sm font-medium mb-3 flex items-center gap-1 ${
-                                                timeInfo.expired ? 'text-red-600' : 
-                                                timeInfo.urgent ? 'text-orange-600' : 'text-gray-600'
-                                            }`}>
-                                                {(timeInfo.expired || timeInfo.urgent) && <AlertCircle size={16} />}
-                                                廃棄期限: {timeInfo.text}
-                                            </div>
-
-                                            {/* 在庫管理 */}
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-3">
-                                                    <button
-                                                        onClick={() => updateStock(bread.id, -1)}
-                                                        disabled={bread.stock === 0}
-                                                        className="w-10 h-10 bg-red-100 hover:bg-red-200 disabled:bg-gray-100 disabled:cursor-not-allowed text-red-600 disabled:text-gray-400 rounded-full flex items-center justify-center transition-colors"
-                                                    >
-                                                        <Minus size={16} />
-                                                    </button>
-                                                    <span className="text-xl font-bold w-8 text-center">
-                                                        {bread.stock}
-                                                    </span>
-                                                    <button
-                                                        onClick={() => updateStock(bread.id, 1)}
-                                                        className="w-10 h-10 bg-green-100 hover:bg-green-200 text-green-600 rounded-full flex items-center justify-center transition-colors"
-                                                    >
-                                                        <Plus size={16} />
-                                                    </button>
+                        {/* ===== 在庫タブ ===== */}
+                        {tab === 'inventory' && (
+                            <>
+                                {expiredCount > 0 && (
+                                    <div className="flex items-center justify-between bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+                                        <span className="flex items-center gap-2"><AlertCircle size={18} /> 廃棄対象が {expiredCount} 件あります</span>
+                                        <button onClick={deleteExpired} className="text-sm font-medium bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded">まとめて削除</button>
+                                    </div>
+                                )}
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {sortedBreads.map((bread) => {
+                                        const timeInfo = getTimeUntilExpiration(bread);
+                                        const v = viewOf(bread);
+                                        return (
+                                            <div key={bread.id} className="bg-white rounded-lg shadow-sm overflow-hidden relative">
+                                                <div className="aspect-video bg-gray-100 relative">
+                                                    {v.photo ? (
+                                                        <img src={v.photo} alt={v.name || 'パン'} className="w-full h-full object-cover" />
+                                                    ) : (
+                                                        <div className="w-full h-full flex items-center justify-center text-gray-500">画像なし</div>
+                                                    )}
+                                                    {v.isTemp && (
+                                                        <span className="absolute top-2 left-2 text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded-full font-medium">臨時入荷</span>
+                                                    )}
+                                                    {timeInfo.expired && (
+                                                        <div className="absolute inset-0 bg-red-500 bg-opacity-75 flex items-center justify-center">
+                                                            <div className="bg-white px-4 py-2 rounded-lg text-red-600 font-bold flex items-center gap-2">
+                                                                廃棄対象
+                                                                <button onClick={() => deleteBread(bread.id)} title="削除"
+                                                                    className="ml-2 w-8 h-8 bg-red-600 hover:bg-red-700 text-white rounded-full flex items-center justify-center">
+                                                                    <Trash2 size={14} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
 
-                                                {/* 削除ボタン */}
-                                                <button
-                                                    onClick={() => deleteBread(bread.id)}
-                                                    className="w-10 h-10 bg-gray-100 hover:bg-red-100 text-gray-600 hover:text-red-600 rounded-full flex items-center justify-center transition-colors"
-                                                >
+                                                <div className="p-4">
+                                                    {v.isTemp ? (
+                                                        <input type="text" value={bread.name} onChange={(e) => updateBread(bread.id, { name: e.target.value })}
+                                                            placeholder="パン名を入力"
+                                                            className="w-full text-lg font-medium border-b border-gray-200 focus:border-blue-500 outline-none pb-1 mb-3" />
+                                                    ) : (
+                                                        <div className="text-lg font-medium text-gray-800 pb-1 mb-3 border-b border-gray-100">
+                                                            {v.name}
+                                                            {v.masterMissing && <span className="ml-2 text-xs text-gray-400">（マスタ削除済み）</span>}
+                                                        </div>
+                                                    )}
+
+                                                    <div className="mb-3"><AllergenChips allergens={v.allergens} /></div>
+
+                                                    <div className="text-sm text-gray-600 mb-2">納品: {formatDateTime(bread.deliveryTime)}</div>
+
+                                                    <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
+                                                        <span>日持ち:</span>
+                                                        <select value={bread.expirationHours ?? 120}
+                                                            onChange={(e) => updateBread(bread.id, { expirationHours: Number(e.target.value) })}
+                                                            className="border border-gray-200 rounded px-2 py-1 text-sm focus:border-blue-500 outline-none bg-white">
+                                                            {DAY_OPTIONS.map(d => <option key={d} value={d * 24}>{d}日</option>)}
+                                                        </select>
+                                                    </div>
+
+                                                    <div className={`text-sm font-medium mb-3 flex items-center gap-1 ${
+                                                        timeInfo.expired ? 'text-red-600' : timeInfo.urgent ? 'text-orange-600' : 'text-gray-600'
+                                                    }`}>
+                                                        {(timeInfo.expired || timeInfo.urgent) && <AlertCircle size={16} />}
+                                                        廃棄期限: {timeInfo.text}
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-3">
+                                                            <button onClick={() => updateStock(bread.id, -1)} disabled={bread.stock === 0}
+                                                                className="w-10 h-10 bg-red-100 hover:bg-red-200 disabled:bg-gray-100 disabled:cursor-not-allowed text-red-600 disabled:text-gray-400 rounded-full flex items-center justify-center transition-colors">
+                                                                <Minus size={16} />
+                                                            </button>
+                                                            <span className="text-xl font-bold w-8 text-center">{bread.stock}</span>
+                                                            <button onClick={() => updateStock(bread.id, 1)}
+                                                                className="w-10 h-10 bg-green-100 hover:bg-green-200 text-green-600 rounded-full flex items-center justify-center transition-colors">
+                                                                <Plus size={16} />
+                                                            </button>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            {v.isTemp && (
+                                                                <button onClick={() => setEditingMaster({ fromBread: bread })}
+                                                                    className="text-xs px-3 py-2 rounded-full border border-blue-300 text-blue-700 hover:bg-blue-50">
+                                                                    マスタに登録
+                                                                </button>
+                                                            )}
+                                                            <button onClick={() => deleteBread(bread.id)}
+                                                                className="w-10 h-10 bg-gray-100 hover:bg-red-100 text-gray-600 hover:text-red-600 rounded-full flex items-center justify-center transition-colors">
+                                                                <Trash2 size={16} />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                {breads.length === 0 && !isLoading && (
+                                    <div className="text-center py-12">
+                                        <div className="flex justify-center text-gray-400 mb-4"><Package size={48} /></div>
+                                        <p className="text-gray-600 text-lg">在庫はありません</p>
+                                        <p className="text-gray-500 text-sm mt-2">
+                                            {masters.length === 0
+                                                ? 'まず「マスタ」タブで取り扱うパンを登録してください'
+                                                : '「入荷を登録」から入荷したパンを選んでください'}
+                                        </p>
+                                    </div>
+                                )}
+                            </>
+                        )}
+
+                        {/* ===== マスタタブ ===== */}
+                        {tab === 'master' && (
+                            <>
+                                <div className="bg-white rounded-lg shadow-sm divide-y">
+                                    {sortedMasters.map(m => {
+                                        const inUse = breads.filter(b => b.masterId === m.id).reduce((s, b) => s + b.stock, 0);
+                                        return (
+                                            <div key={m.id} className="flex items-center gap-3 p-3">
+                                                <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0 flex items-center justify-center text-xs text-gray-400">
+                                                    {m.photo ? <img src={m.photo} className="w-full h-full object-cover" /> : '写真なし'}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="font-medium text-gray-800 truncate">{m.name}</div>
+                                                    <div className="text-xs text-gray-500 mb-1">日持ち {m.expirationDays}日{inUse > 0 && ` ・ 在庫 ${inUse}個`}</div>
+                                                    <AllergenChips allergens={m.allergens} />
+                                                </div>
+                                                <button onClick={() => setEditingMaster(m)} title="編集"
+                                                    className="w-10 h-10 bg-gray-100 hover:bg-blue-100 text-gray-600 hover:text-blue-600 rounded-full flex items-center justify-center">
+                                                    <Pencil size={16} />
+                                                </button>
+                                                <button onClick={() => deleteMaster(m)} title="削除"
+                                                    className="w-10 h-10 bg-gray-100 hover:bg-red-100 text-gray-600 hover:text-red-600 rounded-full flex items-center justify-center">
                                                     <Trash2 size={16} />
                                                 </button>
                                             </div>
-                                        </div>
-
-                                        {/* 期限切れオーバーレイ（写真部分のみ） */}
-                                        {timeInfo.expired && (
-                                            <div className="absolute top-0 left-0 right-0 h-48 bg-red-500 bg-opacity-75 flex items-center justify-center">
-                                                <div className="bg-white px-4 py-2 rounded-lg text-red-600 font-bold flex items-center gap-2">
-                                                    廃棄対象
-                                                    <button
-                                                        onClick={() => deleteBread(bread.id)}
-                                                        className="ml-2 w-8 h-8 bg-red-600 hover:bg-red-700 text-white rounded-full flex items-center justify-center transition-colors"
-                                                        title="削除"
-                                                    >
-                                                        <Trash2 size={14} />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
+                                        );
+                                    })}
+                                </div>
+                                {masters.length === 0 && (
+                                    <div className="text-center py-12 text-gray-600">
+                                        <p className="text-lg">マスタは空です</p>
+                                        <p className="text-sm text-gray-500 mt-2">新しい仕入れ先のパンを登録しましょう</p>
                                     </div>
-                                );
-                            })}
-                        </div>
-
-                        {/* 空の状態 */}
-                        {breads.length === 0 && !isLoading && (
-                            <div className="text-center py-12">
-                                <Camera size={48} className="mx-auto text-gray-400 mb-4" />
-                                <p className="text-gray-600 text-lg">
-                                    写真を撮影してパンを追加してください
+                                )}
+                                <p className="text-xs text-gray-500 mt-4">
+                                    ※ マスタと在庫はこの端末内に保存されます。機種変更やブラウザのデータ削除に備えて、ときどき「バックアップ保存」をしてください。
                                 </p>
-                                <p className="text-gray-500 text-sm mt-2">
-                                    📷 写真は自動で最適化されます
-                                </p>
-                            </div>
+                            </>
                         )}
                     </div>
+
+                    {showReceive && (
+                        <ReceiveModal
+                            masters={sortedMasters}
+                            onReceive={receive}
+                            onClose={() => setShowReceive(false)}
+                            onGoMaster={() => { setShowReceive(false); setTab('master'); setEditingMaster('new'); }}
+                        />
+                    )}
+
+                    {editingMaster && (
+                        <MasterForm
+                            key={editingMaster === 'new' ? 'new' : (editingMaster.fromBread ? `b${editingMaster.fromBread.id}` : editingMaster.id)}
+                            initial={
+                                editingMaster === 'new' ? null
+                                : editingMaster.fromBread ? {
+                                    name: editingMaster.fromBread.name,
+                                    expirationDays: Math.max(1, Math.round((editingMaster.fromBread.expirationHours ?? 120) / 24)),
+                                    photo: editingMaster.fromBread.photo,
+                                    allergens: editingMaster.fromBread.allergens || []
+                                }
+                                : editingMaster
+                            }
+                            onSave={(m) => saveMaster(m, editingMaster.fromBread?.id)}
+                            onCancel={() => setEditingMaster(null)}
+                            setError={setError}
+                        />
+                    )}
                 </div>
             );
         };
 
-        ReactDOM.render(<BreadInventoryApp />, document.getElementById('root'));
+        ReactDOM.createRoot(document.getElementById('root')).render(<BreadInventoryApp />);
     </script>
 </body>
 </html>
