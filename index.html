@@ -15,6 +15,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="パン在庫管理">
     <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Noto+Serif+JP:wght@400;500&display=swap">
+    <style>
+        .font-display { font-family: 'Cormorant Garamond', 'Noto Serif JP', serif; }
+        .font-serif-jp { font-family: 'Noto Serif JP', serif; }
+        .display-root { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+        .display-fade { animation: displayFade .8s ease; }
+        @keyframes displayFade { from { opacity: 0; } to { opacity: 1; } }
+    </style>
 </head>
 <body>
     <div id="root"></div>
@@ -107,6 +116,19 @@
             </svg>
         );
 
+        const Snowflake = ({ size = 24 }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/>
+                <path d="m20 16-4-4 4-4"/><path d="m4 8 4 4-4 4"/><path d="m16 4-4 4-4-4"/><path d="m8 20 4-4 4 4"/>
+            </svg>
+        );
+
+        const Monitor = ({ size = 24 }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+        );
+
         // ===== アレルゲン =====
         // 特定原材料（表示義務 9品目：2025年度にカシューナッツが追加）
         const ALLERGENS_REQUIRED = ['小麦', '卵', '乳', 'えび', 'かに', 'くるみ', 'そば', '落花生', 'カシューナッツ'];
@@ -121,6 +143,28 @@
         // ===== 保存まわり =====
         const STORAGE_INVENTORY = 'breadInventory';
         const STORAGE_MASTER = 'breadMaster';
+        const STORAGE_SETTINGS = 'breadDisplaySettings';
+        const STORAGE_RECEIVE_FROZEN = 'breadReceiveFrozen';
+        const STORAGE_DISPLAY_MODE = 'breadDisplayMode';
+
+        // 解凍後の日持ち（0 = 解凍した日の営業終了まで＝当日中）
+        const THAW_OPTIONS = [
+            { value: 0, label: '当日中' },
+            { value: 24, label: '24時間' },
+            { value: 48, label: '48時間' }
+        ];
+        const thawLabel = (h) => (THAW_OPTIONS.find(o => o.value === h) || { label: `${h}時間` }).label;
+
+        const DEFAULT_SETTINGS = {
+            title: 'FIVERAN BAKERY',
+            subtitle: 'SELECTION',
+            message: 'コーヒーと、いいパンを。',
+            price: '',
+            note: 'ご注文後に温めてお出しします',
+            source: 'all',          // all = 冷凍＋解凍済み / thawed = 解凍済みのみ
+            showAllergens: true,
+            footer: 'SHIMOGAMO'
+        };
 
         const loadJSON = (key, fallback) => {
             try {
@@ -143,6 +187,17 @@
         };
 
         const newId = () => Date.now() + Math.floor(Math.random() * 1000);
+
+        const reviveLot = (b) => ({
+            ...b,
+            deliveryTime: new Date(b.deliveryTime),
+            thawedAt: b.thawedAt ? new Date(b.thawedAt) : null
+        });
+
+        const sameDay = (a, b) => {
+            const x = new Date(a), y = new Date(b);
+            return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+        };
 
         const toLocalInputValue = (date) => {
             const d = new Date(date);
@@ -195,6 +250,7 @@
         const MasterForm = ({ initial, onSave, onCancel, setError }) => {
             const [name, setName] = useState(initial?.name || '');
             const [days, setDays] = useState(initial?.expirationDays ?? 5);
+            const [thawHours, setThawHours] = useState(initial?.thawHours ?? 0);
             const [photo, setPhoto] = useState(initial?.photo || null);
             const [allergens, setAllergens] = useState(initial?.allergens || []);
             const [busy, setBusy] = useState(false);
@@ -228,6 +284,7 @@
                     id: initial?.id ?? newId(),
                     name: name.trim(),
                     expirationDays: Number(days),
+                    thawHours: Number(thawHours),
                     photo,
                     allergens: [...allergens].sort((a, b) => order.indexOf(a) - order.indexOf(b))
                 });
@@ -265,14 +322,27 @@
                             />
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">日持ち</label>
-                            <select
-                                value={days} onChange={e => setDays(Number(e.target.value))}
-                                className="border border-gray-300 rounded-lg px-3 py-2 bg-white focus:border-blue-500 outline-none"
-                            >
-                                {DAY_OPTIONS.map(d => <option key={d} value={d}>{d}日</option>)}
-                            </select>
+                        <div className="flex flex-wrap gap-6">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">日持ち（納品から）</label>
+                                <select
+                                    value={days} onChange={e => setDays(Number(e.target.value))}
+                                    className="border border-gray-300 rounded-lg px-3 py-2 bg-white focus:border-blue-500 outline-none"
+                                >
+                                    {DAY_OPTIONS.map(d => <option key={d} value={d}>{d}日</option>)}
+                                </select>
+                                <p className="text-xs text-gray-500 mt-1">冷凍品は冷凍庫での保管期限</p>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">解凍後の日持ち</label>
+                                <select
+                                    value={thawHours} onChange={e => setThawHours(Number(e.target.value))}
+                                    className="border border-gray-300 rounded-lg px-3 py-2 bg-white focus:border-blue-500 outline-none"
+                                >
+                                    {THAW_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                </select>
+                                <p className="text-xs text-gray-500 mt-1">解凍した時点から数えます</p>
+                            </div>
                         </div>
 
                         <div>
@@ -316,6 +386,8 @@
             const [qty, setQty] = useState({}); // masterId -> 数量
             const [query, setQuery] = useState('');
             const [deliveryTime, setDeliveryTime] = useState(toLocalInputValue(new Date()));
+            const [frozen, setFrozen] = useState(() => loadJSON(STORAGE_RECEIVE_FROZEN, true));
+            const toggleFrozen = () => setFrozen(f => { saveJSON(STORAGE_RECEIVE_FROZEN, !f); return !f; });
 
             const change = (id, delta) => setQty(prev => {
                 const v = Math.max(0, (prev[id] || 0) + delta);
@@ -328,7 +400,7 @@
 
             const submit = () => {
                 if (selected.length === 0) return;
-                onReceive(selected.map(m => ({ master: m, stock: qty[m.id] })), new Date(deliveryTime));
+                onReceive(selected.map(m => ({ master: m, stock: qty[m.id] })), new Date(deliveryTime), frozen);
             };
 
             return (
@@ -338,7 +410,7 @@
                     footer={
                         <button onClick={submit} disabled={selected.length === 0}
                             className="w-full py-3 rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white font-medium">
-                            {selected.length === 0 ? '入荷するパンを選んでください' : `${selected.length}品目・${total}個を入荷`}
+                            {selected.length === 0 ? '入荷するパンを選んでください' : `${selected.length}品目・${total}個を${frozen ? '冷凍で' : ''}入荷`}
                         </button>
                     }
                 >
@@ -349,6 +421,13 @@
                         </div>
                     ) : (
                         <div className="space-y-3">
+                            <button onClick={toggleFrozen}
+                                className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border ${frozen ? 'border-sky-400 bg-sky-50 text-sky-800' : 'border-gray-300 text-gray-700'}`}>
+                                <span className="flex items-center gap-2 font-medium"><Snowflake size={18} /> 冷凍便で入荷</span>
+                                <span className={`w-12 h-7 rounded-full relative transition-colors ${frozen ? 'bg-sky-500' : 'bg-gray-300'}`}>
+                                    <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-all ${frozen ? 'left-6' : 'left-1'}`}></span>
+                                </span>
+                            </button>
                             <div className="flex flex-col sm:flex-row gap-2">
                                 <input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="パン名で検索"
                                     className="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:border-blue-500 outline-none" />
@@ -383,13 +462,233 @@
             );
         };
 
+        // ===== 店頭表示の設定 =====
+        const DisplaySettings = ({ settings, onChange, onReset, itemCount, onStart }) => {
+            const field = (key, label, placeholder, hint) => (
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+                    <input type="text" value={settings[key]} placeholder={placeholder}
+                        onChange={e => onChange({ [key]: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:border-blue-500 outline-none" />
+                    {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
+                </div>
+            );
+            return (
+                <div className="bg-white rounded-lg shadow-sm p-6 space-y-5">
+                    <div className="grid sm:grid-cols-2 gap-4">
+                        {field('title', 'タイトル', 'FIVERAN BAKERY')}
+                        {field('subtitle', 'サブタイトル', 'SELECTION')}
+                        {field('message', 'ひとこと', 'コーヒーと、いいパンを。')}
+                        {field('price', '統一価格', '例：350', '数字だけでOK（¥は自動で付きます）。空欄なら価格は表示しません')}
+                        {field('note', '価格の下の一文', 'ご注文後に温めてお出しします')}
+                        {field('footer', '画面下の店名', 'SHIMOGAMO')}
+                    </div>
+
+                    <div>
+                        <div className="text-sm font-medium text-gray-700 mb-2">表示するパン</div>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            {[
+                                ['all', '冷凍庫の在庫も含めて全部', '注文が入ってから温める運用向け'],
+                                ['thawed', '解凍済みのパンだけ', '朝に解凍して並べる運用向け']
+                            ].map(([k, label, hint]) => (
+                                <button key={k} onClick={() => onChange({ source: k })}
+                                    className={`flex-1 text-left px-4 py-3 rounded-lg border ${settings.source === k ? 'border-blue-500 bg-blue-50' : 'border-gray-300'}`}>
+                                    <div className="font-medium text-gray-800 text-sm">{label}</div>
+                                    <div className="text-xs text-gray-500">{hint}</div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <label className="flex items-center gap-3 text-sm text-gray-700">
+                        <input type="checkbox" checked={settings.showAllergens} onChange={e => onChange({ showAllergens: e.target.checked })} className="w-5 h-5" />
+                        アレルゲンを表示する
+                    </label>
+
+                    <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t">
+                        <button onClick={onStart}
+                            className="flex-1 flex items-center justify-center gap-2 bg-gray-900 hover:bg-black text-white py-3 rounded-lg font-medium mt-3">
+                            <Monitor size={18} /> 店頭表示を開始（今 {itemCount} 品）
+                        </button>
+                        <button onClick={onReset} className="sm:w-40 py-3 rounded-lg border border-gray-300 text-gray-600 text-sm mt-3">初期設定に戻す</button>
+                    </div>
+                    <p className="text-xs text-gray-500 leading-relaxed">
+                        店頭表示中は、画面右下の「管理」を2秒長押しするとこの画面に戻ります。在庫が0個になったパンや廃棄期限を過ぎたパンは自動で表示から消えます。
+                    </p>
+                </div>
+            );
+        };
+
+        // ===== お客さん向け店頭表示 =====
+        const DisplayView = ({ items, settings, onExit }) => {
+            const [page, setPage] = useState(0);
+            const [landscape, setLandscape] = useState(() => window.innerWidth >= window.innerHeight);
+            const [holding, setHolding] = useState(false);
+            const holdTimer = useRef(null);
+
+            useEffect(() => {
+                const onResize = () => setLandscape(window.innerWidth >= window.innerHeight);
+                window.addEventListener('resize', onResize);
+                return () => window.removeEventListener('resize', onResize);
+            }, []);
+
+            // 画面が消えないようにする（対応しているブラウザのみ）
+            useEffect(() => {
+                let lock = null;
+                const request = async () => {
+                    try {
+                        if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+                            lock = await navigator.wakeLock.request('screen');
+                        }
+                    } catch (e) { /* 非対応なら何もしない */ }
+                };
+                request();
+                document.addEventListener('visibilitychange', request);
+                return () => {
+                    document.removeEventListener('visibilitychange', request);
+                    try { lock && lock.release(); } catch (e) {}
+                };
+            }, []);
+
+            // 品数に合わせてレイアウトを決める
+            const n = items.length;
+            const layout = landscape
+                ? (n <= 1 ? [1, 1] : n <= 3 ? [n, 1] : n <= 4 ? [4, 1] : n <= 6 ? [3, 2] : [4, 2])
+                : (n <= 1 ? [1, 1] : n <= 2 ? [1, 2] : n <= 4 ? [2, 2] : [2, 3]);
+            const perPage = layout[0] * layout[1];
+            const minCols = landscape ? 3 : 2;
+            const pages = Math.max(1, Math.ceil(n / perPage));
+            const current = page % pages;
+            const pageItems = items.slice(current * perPage, current * perPage + perPage);
+
+            useEffect(() => {
+                if (pages <= 1) return;
+                const t = setInterval(() => setPage(p => (p + 1) % pages), 8000);
+                return () => clearInterval(t);
+            }, [pages]);
+
+            const startHold = () => {
+                setHolding(true);
+                holdTimer.current = setTimeout(() => { setHolding(false); onExit(); }, 2000);
+            };
+            const cancelHold = () => {
+                setHolding(false);
+                clearTimeout(holdTimer.current);
+            };
+
+            const price = String(settings.price || '').trim();
+            const priceText = price ? (/^[\d,]+$/.test(price) ? `¥${price}` : price) : '';
+            const ink = '#EFE9DF', muted = 'rgba(239,233,223,0.55)', line = 'rgba(239,233,223,0.18)';
+
+            return (
+                <div className="display-root fixed inset-0 flex flex-col overflow-hidden" style={{ background: '#13110F', color: ink, padding: '3.5vh 4vw 2.5vh' }}>
+                    {/* ヘッダー */}
+                    <div className="flex items-end justify-between gap-6 pb-[2.5vh]" style={{ borderBottom: `1px solid ${line}` }}>
+                        <div className="min-w-0">
+                            <div className="font-display leading-none" style={{ fontSize: 'clamp(28px, 4.6vw, 64px)', letterSpacing: '0.18em', fontWeight: 500 }}>
+                                {settings.title}
+                            </div>
+                            {settings.subtitle && (
+                                <div className="font-display mt-2" style={{ fontSize: 'clamp(12px, 1.5vw, 20px)', letterSpacing: '0.42em', color: muted }}>
+                                    {settings.subtitle}
+                                </div>
+                            )}
+                            {settings.message && (
+                                <div className="font-serif-jp mt-3" style={{ fontSize: 'clamp(12px, 1.4vw, 18px)', color: muted, letterSpacing: '0.12em' }}>
+                                    {settings.message}
+                                </div>
+                            )}
+                        </div>
+                        {(priceText || settings.note) && (
+                            <div className="text-right flex-shrink-0">
+                                {priceText && (
+                                    <div className="flex items-baseline justify-end gap-3">
+                                        <span className="font-serif-jp" style={{ fontSize: 'clamp(12px, 1.4vw, 18px)', color: muted, letterSpacing: '0.2em' }}>全品</span>
+                                        <span className="font-display leading-none" style={{ fontSize: 'clamp(32px, 5vw, 72px)', fontWeight: 500 }}>{priceText}</span>
+                                    </div>
+                                )}
+                                {settings.note && (
+                                    <div className="font-serif-jp mt-2" style={{ fontSize: 'clamp(11px, 1.25vw, 16px)', color: muted, letterSpacing: '0.1em' }}>
+                                        {settings.note}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* パン一覧 */}
+                    <div className="flex-1 min-h-0 py-[3vh]">
+                        {n === 0 ? (
+                            <div className="h-full flex flex-col items-center justify-center text-center">
+                                <div className="font-serif-jp" style={{ fontSize: 'clamp(18px, 2.4vw, 32px)', letterSpacing: '0.15em' }}>本日のパンは売り切れました</div>
+                                <div className="font-display mt-4" style={{ fontSize: 'clamp(12px, 1.4vw, 18px)', color: muted, letterSpacing: '0.3em' }}>SOLD OUT · THANK YOU</div>
+                            </div>
+                        ) : (
+                            <div key={`${current}-${perPage}`} className="display-fade h-full grid"
+                                style={n < minCols ? {
+                                    // 品数が少ないときは大きくなりすぎないよう中央寄せ
+                                    gridTemplateColumns: `repeat(${n}, calc((100% - ${minCols - 1} * 2.2vw) / ${minCols}))`,
+                                    gridTemplateRows: landscape ? 'minmax(0, 1fr)' : 'minmax(0, 0.6fr)',
+                                    justifyContent: 'center', alignContent: 'center', gap: '2.5vh 2.2vw'
+                                } : {
+                                    gridTemplateColumns: `repeat(${layout[0]}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${layout[1]}, minmax(0, 1fr))`, gap: '2.5vh 2.2vw'
+                                }}>
+                                {pageItems.map(item => (
+                                    <div key={item.key} className="flex flex-col min-h-0">
+                                        <div className="flex-1 min-h-0 overflow-hidden relative" style={{ background: '#1E1B18', borderRadius: 4 }}>
+                                            {item.photo ? (
+                                                <img src={item.photo} alt={item.name} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center font-serif-jp px-4 text-center" style={{ color: muted, fontSize: 'clamp(14px, 1.8vw, 24px)' }}>{item.name}</div>
+                                            )}
+                                            {item.stock === 1 && (
+                                                <span className="absolute top-3 right-3 font-serif-jp px-3 py-1" style={{ background: 'rgba(19,17,15,0.78)', fontSize: 'clamp(10px, 1.1vw, 14px)', letterSpacing: '0.1em', borderRadius: 2 }}>残りわずか</span>
+                                            )}
+                                        </div>
+                                        <div className="pt-[1.4vh]">
+                                            <div className="font-serif-jp truncate" style={{ fontSize: 'clamp(14px, 1.7vw, 24px)', letterSpacing: '0.06em' }}>{item.name}</div>
+                                            {settings.showAllergens && item.allergens && item.allergens.length > 0 && (
+                                                <div className="font-serif-jp truncate mt-1" style={{ fontSize: 'clamp(10px, 1vw, 13px)', color: muted }}>
+                                                    アレルゲン：{item.allergens.join('・')}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* フッター */}
+                    <div className="flex items-center justify-between pt-[1.8vh]" style={{ borderTop: `1px solid ${line}` }}>
+                        <div className="font-display" style={{ fontSize: 'clamp(11px, 1.2vw, 15px)', letterSpacing: '0.4em', color: muted }}>{settings.footer}</div>
+                        <div className="flex gap-2">
+                            {pages > 1 && Array.from({ length: pages }).map((_, i) => (
+                                <span key={i} style={{ width: 6, height: 6, borderRadius: 3, background: i === current ? ink : line }} />
+                            ))}
+                        </div>
+                        <button
+                            onPointerDown={startHold} onPointerUp={cancelHold} onPointerLeave={cancelHold} onPointerCancel={cancelHold}
+                            onContextMenu={e => e.preventDefault()}
+                            className="font-serif-jp px-3 py-2 -my-2 -mr-3 transition-colors"
+                            style={{ fontSize: 12, color: holding ? ink : 'rgba(239,233,223,0.22)', letterSpacing: '0.1em' }}>
+                            {holding ? '戻ります…' : '管理'}
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
         // ===== メインアプリ =====
         const BreadInventoryApp = () => {
             const [tab, setTab] = useState('inventory');
             const [breads, setBreads] = useState(() =>
-                loadJSON(STORAGE_INVENTORY, []).map(b => ({ ...b, deliveryTime: new Date(b.deliveryTime) }))
+                loadJSON(STORAGE_INVENTORY, []).map(reviveLot)
             );
             const [masters, setMasters] = useState(() => loadJSON(STORAGE_MASTER, []));
+            const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...loadJSON(STORAGE_SETTINGS, {}) }));
+            const [displayMode, setDisplayMode] = useState(() => loadJSON(STORAGE_DISPLAY_MODE, false));
+            const [filter, setFilter] = useState('all'); // all | thawed | frozen
             const [currentTime, setCurrentTime] = useState(new Date());
             const [isLoading, setIsLoading] = useState(false);
             const [error, setError] = useState('');
@@ -410,6 +709,9 @@
                 }
             }, [masters]);
 
+            useEffect(() => { saveJSON(STORAGE_SETTINGS, settings); }, [settings]);
+            useEffect(() => { saveJSON(STORAGE_DISPLAY_MODE, displayMode); }, [displayMode]);
+
             useEffect(() => {
                 const timer = setInterval(() => setCurrentTime(new Date()), 60000);
                 return () => clearInterval(timer);
@@ -424,13 +726,14 @@
                     name: m ? m.name : bread.name,
                     photo: m ? m.photo : bread.photo,
                     allergens: m ? m.allergens : (bread.allergens || []),
+                    thawHours: m ? m.thawHours : undefined,
                     isTemp: bread.masterId == null,
                     masterMissing: bread.masterId != null && !m
                 };
             };
 
             // ----- 入荷 -----
-            const receive = (items, deliveryTime) => {
+            const receive = (items, deliveryTime, frozen) => {
                 const lots = items.map(({ master, stock }, i) => ({
                     id: newId() + i,
                     masterId: master.id,
@@ -438,10 +741,43 @@
                     allergens: master.allergens,     // マスタ削除時の控え
                     deliveryTime,
                     expirationHours: master.expirationDays * 24,
+                    frozen: !!frozen,
+                    thawedAt: null,
+                    thawHours: master.thawHours ?? 0,
                     stock
                 }));
                 setBreads(prev => [...prev, ...lots]);
                 setShowReceive(false);
+                if (frozen) setFilter('all');
+            };
+
+            // ----- 解凍（冷凍ロットから1個ずつ、解凍済みロットへ移す） -----
+            const thawOne = (lotId) => {
+                setBreads(prev => {
+                    const src = prev.find(b => b.id === lotId);
+                    if (!src || !src.frozen || src.stock <= 0) return prev;
+                    const now = new Date();
+                    const m = src.masterId != null ? masters.find(x => x.id === src.masterId) : null;
+                    const thawHours = m?.thawHours ?? src.thawHours ?? 0;
+                    // 同じ冷凍ロットから今日解凍した分があればまとめる
+                    const target = prev.find(b => !b.frozen && b.thawedFrom === src.id && b.thawedAt && sameDay(b.thawedAt, now));
+                    let next = prev.map(b => b.id === src.id ? { ...b, stock: b.stock - 1 } : b);
+                    if (target) {
+                        next = next.map(b => b.id === target.id ? { ...b, stock: b.stock + 1 } : b);
+                    } else {
+                        next = [...next, {
+                            ...src,
+                            id: newId(),
+                            frozen: false,
+                            thawedFrom: src.id,
+                            thawedAt: now,
+                            thawHours,
+                            stock: 1
+                        }];
+                    }
+                    // 冷凍分を使い切ったら冷凍ロットは片付ける
+                    return next.filter(b => !(b.id === src.id && b.stock <= 0));
+                });
             };
 
             const handlePhotoCapture = async (event) => {
@@ -541,8 +877,17 @@
             };
 
             // ----- 期限計算 -----
-            const getExpirationTime = (bread) =>
-                new Date(new Date(bread.deliveryTime).getTime() + (bread.expirationHours ?? 120) * 3600 * 1000);
+            const getExpirationTime = (bread) => {
+                if (bread.thawedAt) {
+                    const t = new Date(bread.thawedAt);
+                    if (!bread.thawHours) {
+                        // 当日中 = 解凍した日の23:59まで
+                        return new Date(t.getFullYear(), t.getMonth(), t.getDate(), 23, 59, 59);
+                    }
+                    return new Date(t.getTime() + bread.thawHours * 3600 * 1000);
+                }
+                return new Date(new Date(bread.deliveryTime).getTime() + (bread.expirationHours ?? 120) * 3600 * 1000);
+            };
 
             const getTimeUntilExpiration = (bread) => {
                 const diff = getExpirationTime(bread) - currentTime;
@@ -554,7 +899,31 @@
             };
 
             // 期限が近い順に並べる
-            const sortedBreads = [...breads].sort((a, b) => getExpirationTime(a) - getExpirationTime(b));
+            const sortedBreads = [...breads]
+                .filter(b => filter === 'all' || (filter === 'frozen' ? b.frozen : !b.frozen))
+                .sort((a, b) => getExpirationTime(a) - getExpirationTime(b));
+            const frozenCount = breads.filter(b => b.frozen).reduce((s, b) => s + b.stock, 0);
+            const thawedCount = breads.filter(b => !b.frozen).reduce((s, b) => s + b.stock, 0);
+
+            // ----- 店頭表示に出すパン（同じパンはまとめる） -----
+            const displayItems = (() => {
+                const map = new Map();
+                breads.forEach(b => {
+                    if (b.stock <= 0 || getTimeUntilExpiration(b).expired) return;
+                    if (settings.source === 'thawed' && b.frozen) return;
+                    const v = viewOf(b);
+                    if (!v.name) return;
+                    const key = b.masterId != null ? `m${b.masterId}` : `n${v.name}`;
+                    const cur = map.get(key);
+                    if (cur) {
+                        cur.stock += b.stock;
+                        if (!cur.photo && v.photo) cur.photo = v.photo;
+                    } else {
+                        map.set(key, { key, name: v.name, photo: v.photo, allergens: v.allergens, stock: b.stock });
+                    }
+                });
+                return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+            })();
             const expiredCount = breads.filter(b => getTimeUntilExpiration(b).expired).length;
             const sortedMasters = [...masters].sort((a, b) => a.name.localeCompare(b.name, 'ja'));
 
@@ -564,6 +933,10 @@
                         tab === key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-600'
                     }`}>{label}</button>
             );
+
+            if (displayMode) {
+                return <DisplayView items={displayItems} settings={settings} onExit={() => setDisplayMode(false)} />;
+            }
 
             return (
                 <div className="min-h-screen bg-gray-50 p-4">
@@ -584,16 +957,25 @@
                         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
                             <div className="flex items-center justify-between mb-4">
                                 <h1 className="text-2xl font-bold text-gray-800">パン在庫管理</h1>
-                                <div className="flex items-center gap-1 text-sm text-gray-600">
-                                    <Clock size={16} /> {formatDateTime(currentTime)}
+                                <div className="flex items-center gap-3">
+                                    <div className="hidden sm:flex items-center gap-1 text-sm text-gray-600">
+                                        <Clock size={16} /> {formatDateTime(currentTime)}
+                                    </div>
+                                    <button onClick={() => setDisplayMode(true)}
+                                        className="flex items-center gap-2 bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg text-sm font-medium">
+                                        <Monitor size={16} /> 店頭表示
+                                    </button>
                                 </div>
                             </div>
                             <div className="flex bg-gray-100 rounded-lg p-1 mb-4">
                                 {tabBtn('inventory', `在庫（${breads.length}）`)}
                                 {tabBtn('master', `マスタ（${masters.length}）`)}
+                                {tabBtn('display', '店頭表示の設定')}
                             </div>
 
-                            {tab === 'inventory' ? (
+                            {tab === 'display' ? (
+                                <p className="text-sm text-gray-600">お客さんに見せる画面の文言と、表示するパンの範囲を決めます。</p>
+                            ) : tab === 'inventory' ? (
                                 <div className="flex flex-col sm:flex-row gap-3">
                                     <button onClick={() => setShowReceive(true)}
                                         className="flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium transition-colors">
@@ -623,6 +1005,20 @@
                         {/* ===== 在庫タブ ===== */}
                         {tab === 'inventory' && (
                             <>
+                                {breads.length > 0 && (
+                                    <div className="flex gap-2 mb-4 overflow-x-auto">
+                                        {[
+                                            ['all', `すべて`],
+                                            ['thawed', `解凍済み・常温（${thawedCount}個）`],
+                                            ['frozen', `冷凍庫（${frozenCount}個）`]
+                                        ].map(([k, label]) => (
+                                            <button key={k} onClick={() => setFilter(k)}
+                                                className={`whitespace-nowrap px-4 py-2 rounded-full text-sm border ${filter === k ? 'bg-gray-800 border-gray-800 text-white' : 'bg-white border-gray-300 text-gray-700'}`}>
+                                                {label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                                 {expiredCount > 0 && (
                                     <div className="flex items-center justify-between bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
                                         <span className="flex items-center gap-2"><AlertCircle size={18} /> 廃棄対象が {expiredCount} 件あります</span>
@@ -641,9 +1037,17 @@
                                                     ) : (
                                                         <div className="w-full h-full flex items-center justify-center text-gray-500">画像なし</div>
                                                     )}
-                                                    {v.isTemp && (
-                                                        <span className="absolute top-2 left-2 text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded-full font-medium">臨時入荷</span>
-                                                    )}
+                                                    <div className="absolute top-2 left-2 flex gap-1">
+                                                        {v.isTemp && (
+                                                            <span className="text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded-full font-medium">臨時入荷</span>
+                                                        )}
+                                                        {bread.frozen && (
+                                                            <span className="text-xs bg-sky-500 text-white px-2 py-0.5 rounded-full font-medium flex items-center gap-1"><Snowflake size={12} /> 冷凍</span>
+                                                        )}
+                                                        {bread.thawedAt && (
+                                                            <span className="text-xs bg-orange-400 text-white px-2 py-0.5 rounded-full font-medium">解凍済み</span>
+                                                        )}
+                                                    </div>
                                                     {timeInfo.expired && (
                                                         <div className="absolute inset-0 bg-red-500 bg-opacity-75 flex items-center justify-center">
                                                             <div className="bg-white px-4 py-2 rounded-lg text-red-600 font-bold flex items-center gap-2">
@@ -671,16 +1075,39 @@
 
                                                     <div className="mb-3"><AllergenChips allergens={v.allergens} /></div>
 
-                                                    <div className="text-sm text-gray-600 mb-2">納品: {formatDateTime(bread.deliveryTime)}</div>
+                                                    <div className="text-sm text-gray-600 mb-2">
+                                                        納品: {formatDateTime(bread.deliveryTime)}
+                                                        {bread.thawedAt && <span className="ml-3 text-orange-700">解凍: {formatDateTime(bread.thawedAt)}</span>}
+                                                    </div>
 
                                                     <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
-                                                        <span>日持ち:</span>
-                                                        <select value={bread.expirationHours ?? 120}
-                                                            onChange={(e) => updateBread(bread.id, { expirationHours: Number(e.target.value) })}
-                                                            className="border border-gray-200 rounded px-2 py-1 text-sm focus:border-blue-500 outline-none bg-white">
-                                                            {DAY_OPTIONS.map(d => <option key={d} value={d * 24}>{d}日</option>)}
-                                                        </select>
+                                                        {bread.thawedAt ? (
+                                                            <>
+                                                                <span>解凍後の日持ち:</span>
+                                                                <select value={bread.thawHours ?? 0}
+                                                                    onChange={(e) => updateBread(bread.id, { thawHours: Number(e.target.value) })}
+                                                                    className="border border-gray-200 rounded px-2 py-1 text-sm focus:border-blue-500 outline-none bg-white">
+                                                                    {THAW_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                                                </select>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <span>{bread.frozen ? '冷凍保管:' : '日持ち:'}</span>
+                                                                <select value={bread.expirationHours ?? 120}
+                                                                    onChange={(e) => updateBread(bread.id, { expirationHours: Number(e.target.value) })}
+                                                                    className="border border-gray-200 rounded px-2 py-1 text-sm focus:border-blue-500 outline-none bg-white">
+                                                                    {DAY_OPTIONS.map(d => <option key={d} value={d * 24}>{d}日</option>)}
+                                                                </select>
+                                                            </>
+                                                        )}
                                                     </div>
+
+                                                    {bread.frozen && bread.stock > 0 && !timeInfo.expired && (
+                                                        <button onClick={() => thawOne(bread.id)}
+                                                            className="w-full mb-3 py-2.5 rounded-lg bg-orange-50 hover:bg-orange-100 border border-orange-300 text-orange-800 font-medium text-sm">
+                                                            1個解凍する（解凍後 {thawLabel(viewOf(bread).thawHours ?? bread.thawHours ?? 0)}）
+                                                        </button>
+                                                    )}
 
                                                     <div className={`text-sm font-medium mb-3 flex items-center gap-1 ${
                                                         timeInfo.expired ? 'text-red-600' : timeInfo.urgent ? 'text-orange-600' : 'text-gray-600'
@@ -720,6 +1147,9 @@
                                     })}
                                 </div>
 
+                                {breads.length > 0 && sortedBreads.length === 0 && (
+                                    <p className="text-center py-10 text-gray-500">{filter === 'frozen' ? '冷凍庫の在庫はありません' : '解凍済みのパンはありません'}</p>
+                                )}
                                 {breads.length === 0 && !isLoading && (
                                     <div className="text-center py-12">
                                         <div className="flex justify-center text-gray-400 mb-4"><Package size={48} /></div>
@@ -747,7 +1177,7 @@
                                                 </div>
                                                 <div className="flex-1 min-w-0">
                                                     <div className="font-medium text-gray-800 truncate">{m.name}</div>
-                                                    <div className="text-xs text-gray-500 mb-1">日持ち {m.expirationDays}日{inUse > 0 && ` ・ 在庫 ${inUse}個`}</div>
+                                                    <div className="text-xs text-gray-500 mb-1">日持ち {m.expirationDays}日 ・ 解凍後 {thawLabel(m.thawHours ?? 0)}{inUse > 0 && ` ・ 在庫 ${inUse}個`}</div>
                                                     <AllergenChips allergens={m.allergens} />
                                                 </div>
                                                 <button onClick={() => setEditingMaster(m)} title="編集"
@@ -774,6 +1204,18 @@
                             </>
                         )}
                     </div>
+
+                    {tab === 'display' && (
+                        <div className="max-w-4xl mx-auto">
+                            <DisplaySettings
+                                settings={settings}
+                                onChange={(patch) => setSettings(s => ({ ...s, ...patch }))}
+                                onReset={() => confirm('文言を初期設定に戻しますか？') && setSettings(DEFAULT_SETTINGS)}
+                                itemCount={displayItems.length}
+                                onStart={() => setDisplayMode(true)}
+                            />
+                        </div>
+                    )}
 
                     {showReceive && (
                         <ReceiveModal
