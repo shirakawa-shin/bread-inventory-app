@@ -519,6 +519,36 @@
             );
         };
 
+        // ===== 全画面表示（Safariのタブ・アドレスバーを隠す） =====
+        const isStandalone = () =>
+            window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+        const isFullscreen = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+        const enterFullscreen = () => {
+            if (isStandalone() || isFullscreen()) return;
+            const el = document.documentElement;
+            try {
+                const req = el.requestFullscreen || el.webkitRequestFullscreen;
+                if (req) {
+                    const r = req.call(el);
+                    if (r && r.catch) r.catch(() => {});
+                }
+            } catch (e) { /* 非対応なら何もしない */ }
+        };
+        const exitFullscreen = () => {
+            if (!isFullscreen()) return;
+            try {
+                const ex = document.exitFullscreen || document.webkitExitFullscreen;
+                if (ex) {
+                    const r = ex.call(document);
+                    if (r && r.catch) r.catch(() => {});
+                }
+            } catch (e) {}
+        };
+        const canFullscreen = () => {
+            const el = document.documentElement;
+            return !!(el.requestFullscreen || el.webkitRequestFullscreen);
+        };
+
         // ===== お客さん向け店頭表示 =====
         const DisplayView = ({ items, settings, onExit }) => {
             const [page, setPage] = useState(0);
@@ -567,21 +597,54 @@
                 return () => clearInterval(t);
             }, [pages]);
 
-            const startHold = () => {
-                setHolding(true);
-                holdTimer.current = setTimeout(() => { setHolding(false); onExit(); }, 2000);
+            // 「管理」の長押し（2秒）で管理画面へ。iPadのSafariでも確実に動くようタッチイベントで処理する
+            const tapTimes = useRef([]);
+            const exitNow = () => {
+                clearTimeout(holdTimer.current);
+                setHolding(false);
+                exitFullscreen();
+                onExit();
             };
-            const cancelHold = () => {
+            const lastTouch = useRef(0);
+            const startHold = (e) => {
+                if (e.type === 'touchstart') lastTouch.current = Date.now();
+                else if (Date.now() - lastTouch.current < 1000) return; // タッチ後に来る疑似マウスイベントは無視
+                clearTimeout(holdTimer.current);
+                setHolding(true);
+                holdTimer.current = setTimeout(exitNow, 2000);
+                // 予備：3秒以内に5回タップでも戻れる
+                const now = Date.now();
+                tapTimes.current = [...tapTimes.current.filter(t => now - t < 3000), now];
+                if (tapTimes.current.length >= 5) { tapTimes.current = []; exitNow(); }
+            };
+            const cancelHold = (e) => {
+                if (e && e.type && e.type.startsWith('mouse') && Date.now() - lastTouch.current < 1000) return;
                 setHolding(false);
                 clearTimeout(holdTimer.current);
             };
+            useEffect(() => () => clearTimeout(holdTimer.current), []);
+
+            // 再読み込み後など全画面になっていないときは、画面のどこかをタップすると全画面に戻す
+            const [fs, setFs] = useState(isFullscreen());
+            useEffect(() => {
+                const onFs = () => setFs(isFullscreen());
+                document.addEventListener('fullscreenchange', onFs);
+                document.addEventListener('webkitfullscreenchange', onFs);
+                return () => {
+                    document.removeEventListener('fullscreenchange', onFs);
+                    document.removeEventListener('webkitfullscreenchange', onFs);
+                };
+            }, []);
+            const needFsHint = !fs && !isStandalone() && canFullscreen();
 
             const price = String(settings.price || '').trim();
             const priceText = price ? (/^[\d,]+$/.test(price) ? `¥${price}` : price) : '';
             const ink = '#EFE9DF', muted = 'rgba(239,233,223,0.55)', line = 'rgba(239,233,223,0.18)';
 
             return (
-                <div className="display-root fixed inset-0 flex flex-col overflow-hidden" style={{ background: '#13110F', color: ink, padding: '3.5vh 4vw 2.5vh' }}>
+                <div className="display-root fixed inset-0 flex flex-col overflow-hidden"
+                    onClick={() => { if (needFsHint) enterFullscreen(); }}
+                    style={{ background: '#13110F', color: ink, padding: '3.5vh 4vw 2.5vh', touchAction: 'none' }}>
                     {/* ヘッダー */}
                     <div className="flex items-end justify-between gap-6 pb-[2.5vh]" style={{ borderBottom: `1px solid ${line}` }}>
                         <div className="min-w-0">
@@ -662,18 +725,34 @@
                     {/* フッター */}
                     <div className="flex items-center justify-between pt-[1.8vh]" style={{ borderTop: `1px solid ${line}` }}>
                         <div className="font-display" style={{ fontSize: 'clamp(11px, 1.2vw, 15px)', letterSpacing: '0.4em', color: muted }}>{settings.footer}</div>
-                        <div className="flex gap-2">
-                            {pages > 1 && Array.from({ length: pages }).map((_, i) => (
+                        <div className="flex gap-2 items-center">
+                            {needFsHint && (
+                                <span className="font-serif-jp" style={{ fontSize: 11, color: 'rgba(239,233,223,0.3)', letterSpacing: '0.1em' }}>画面をタップで全画面</span>
+                            )}
+                            {!needFsHint && pages > 1 && Array.from({ length: pages }).map((_, i) => (
                                 <span key={i} style={{ width: 6, height: 6, borderRadius: 3, background: i === current ? ink : line }} />
                             ))}
                         </div>
-                        <button
-                            onPointerDown={startHold} onPointerUp={cancelHold} onPointerLeave={cancelHold} onPointerCancel={cancelHold}
+                        <div
+                            role="button" aria-label="長押しで管理画面へ"
+                            onTouchStart={startHold} onTouchEnd={cancelHold} onTouchCancel={cancelHold}
+                            onMouseDown={startHold} onMouseUp={cancelHold} onMouseLeave={() => cancelHold()}
+                            onClick={e => e.stopPropagation()}
                             onContextMenu={e => e.preventDefault()}
-                            className="font-serif-jp px-3 py-2 -my-2 -mr-3 transition-colors"
-                            style={{ fontSize: 12, color: holding ? ink : 'rgba(239,233,223,0.22)', letterSpacing: '0.1em' }}>
-                            {holding ? '戻ります…' : '管理'}
-                        </button>
+                            className="font-serif-jp relative flex items-center justify-end"
+                            style={{
+                                minWidth: 120, minHeight: 56, margin: '-16px -16px -16px 0', padding: '0 16px',
+                                fontSize: 13, letterSpacing: '0.1em', touchAction: 'none',
+                                WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none',
+                                color: holding ? ink : 'rgba(239,233,223,0.28)'
+                            }}>
+                            {holding ? '長押し中…' : '管理'}
+                            <span style={{
+                                position: 'absolute', left: 16, right: 16, bottom: 10, height: 2, background: ink,
+                                transformOrigin: 'left', transform: `scaleX(${holding ? 1 : 0})`,
+                                transition: holding ? 'transform 2s linear' : 'none', opacity: 0.7
+                            }} />
+                        </div>
                     </div>
                 </div>
             );
@@ -934,6 +1013,11 @@
                     }`}>{label}</button>
             );
 
+            const startDisplay = () => {
+                enterFullscreen(); // ボタンを押した瞬間でないと全画面にできないのでここで呼ぶ
+                setDisplayMode(true);
+            };
+
             if (displayMode) {
                 return <DisplayView items={displayItems} settings={settings} onExit={() => setDisplayMode(false)} />;
             }
@@ -961,7 +1045,7 @@
                                     <div className="hidden sm:flex items-center gap-1 text-sm text-gray-600">
                                         <Clock size={16} /> {formatDateTime(currentTime)}
                                     </div>
-                                    <button onClick={() => setDisplayMode(true)}
+                                    <button onClick={startDisplay}
                                         className="flex items-center gap-2 bg-gray-900 hover:bg-black text-white px-4 py-2 rounded-lg text-sm font-medium">
                                         <Monitor size={16} /> 店頭表示
                                     </button>
@@ -1212,7 +1296,7 @@
                                 onChange={(patch) => setSettings(s => ({ ...s, ...patch }))}
                                 onReset={() => confirm('文言を初期設定に戻しますか？') && setSettings(DEFAULT_SETTINGS)}
                                 itemCount={displayItems.length}
-                                onStart={() => setDisplayMode(true)}
+                                onStart={startDisplay}
                             />
                         </div>
                     )}
